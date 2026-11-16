@@ -14,13 +14,20 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 ## App Store (16-11-2026)
 
 - Record "What Platform" created in team 338 TAC, S.L. (en-GB, bundle com.jfcaba.platform, SKU whatplatform-ios).
-- Build 1.0.0 (1) uploaded with `xcodebuild -exportArchive` (method app-store-connect, upload): processing → TestFlight.
+- Builds uploaded with `xcodebuild -exportArchive` (method app-store-connect, upload):
+  1.0.0 (1); (2) time column fix; (3) restores NSLocationAlwaysAndWhenInUseUsageDescription (ITMS-90683:
+  Apple requires it because geolocator references the API; the app only asks When In Use).
 
 ## Google Play (16-11-2026)
 
 - "Create app" filled in on the "Jose Catala" account (What Platform, com.jfcaba.platform, en-GB, app, free).
-  The two declarations are ticked by the user. AAB 1.0.0 (1) signed with Andén's upload key:
+  The two declarations are ticked by the user. AAB 1.0.0 (3) signed with Andén's upload key:
   `app/build/app/outputs/bundle/release/app-release.aab` (51 MB, uploaded by the user).
+
+## Screenshots
+
+`docs/store/screenshots/ios-6.3/` (1206×2622: King's Cross, Manchester, Reading, Birmingham, search) and
+`docs/store/screenshots/android/` (1080×2400: the same four stations). Live data, 16-11-2026 ~16:00 UK.
 
 ## Pending (user)
 
