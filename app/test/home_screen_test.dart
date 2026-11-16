@@ -171,7 +171,7 @@ void main() {
       c = AppController(server.client, dir, DeparturesClient(server.client), location,
           await SharedPreferences.getInstance(), clock: () => clockNow, periodic: timers.create);
       final s = c.start();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await location.waitForRequest();
       location.answer(null);
       await s;
     });

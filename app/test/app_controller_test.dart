@@ -41,7 +41,7 @@ void main() {
   Future<AppController> startedAt((double, double)? where) async {
     final c = await make();
     final started = c.start();
-    await settle();
+    await location.waitForRequest();
     location.answer(where);
     await started;
     await settle();
@@ -80,7 +80,7 @@ void main() {
     test('resume during start (permission dialog) does not drop the location answer', () async {
       final c = await make();
       final started = c.start();
-      await settle();
+      await location.waitForRequest();
       final resumed = c.onForeground(); // iOS reports resumed when the permission dialog closes
       await settle();
       // A lookup started on resume may answer first with "no permission yet"; the dialog answer follows.
@@ -224,7 +224,7 @@ void main() {
       final c = await make();
       server.hold('KGX');
       final started = c.start();
-      await settle();
+      await location.waitForRequest();
       location.answer(nearKingsCross);
       await settle();
       expect(server.requested, ['KGX']);

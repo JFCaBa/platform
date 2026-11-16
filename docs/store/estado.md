@@ -13,7 +13,8 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 
 ## Pending (user)
 
-- Store owner (individual or 338 TAC) and final store name.
+- Decided 16-11-2026: published by the user (same accounts as Andén), store name "What Platform".
+  Personal Play account → 14-day closed test with 12+ testers.
 - App icon (the Andén icon is a placeholder).
 - App Store Connect / Play Console entries, following `tren/docs/store/estado.md`. No "Submit for review"
   without explicit confirmation.

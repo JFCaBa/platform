@@ -1,6 +1,6 @@
 # Store listing (en-GB) — draft
 
-- **Name:** What Platform (provisional)
+- **Name:** What Platform
 - **Subtitle (App Store, 30):** Next trains & platform, nearby
 - **Short description (Play, 80):** Next trains and their platform at your nearest station. No ads, no account.
 - **Keywords (App Store, 100):** train,trains,platform,departures,national rail,live,station,uk,railway,times,delays

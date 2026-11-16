@@ -94,6 +94,16 @@ class FakeLocation implements LocationSource {
     return c.future;
   }
 
+  /// Waits until the app has asked for the location (loading the station list first
+  /// can take a while on a slow machine).
+  Future<void> waitForRequest({int count = 1}) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (pending.where((c) => !c.isCompleted).length < count) {
+      if (DateTime.now().isAfter(deadline)) throw StateError('location never requested');
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
+
   void answer((double, double)? coords) {
     for (final c in pending) {
       if (!c.isCompleted) c.complete(coords);
