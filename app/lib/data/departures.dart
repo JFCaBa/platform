@@ -70,7 +70,7 @@ class Board {
       );
 }
 
-/// The server asked us to back off (429/503).
+/// Darwin asked us to slow down (429): back off for minutes.
 class RateLimited implements Exception {
   const RateLimited();
   @override
@@ -101,7 +101,7 @@ class DeparturesClient {
     } catch (e) {
       throw DeparturesUnavailable(e);
     }
-    if (resp.statusCode == 429 || resp.statusCode == 503) throw const RateLimited();
+    if (resp.statusCode == 429) throw const RateLimited();
     if (resp.statusCode != 200) throw DeparturesUnavailable('HTTP ${resp.statusCode}');
     try {
       return Board.fromJson(jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>);

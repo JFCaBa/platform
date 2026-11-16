@@ -195,7 +195,7 @@ void main() {
       server.release('KGX');
     });
 
-    for (final code in [429, 503]) {
+    for (final code in [429]) {
       test('$code backs off for 5 min, then resumes', () async {
         final c = await startedAt(nearKingsCross);
         server.status['KGX'] = code;
@@ -217,6 +217,20 @@ void main() {
         expect(c.rateLimited, isFalse);
       });
     }
+  });
+
+  test('503 is a plain failure: retry works at once', () async {
+    final c = await startedAt(nearKingsCross);
+    server.status['KGX'] = 503;
+    timers.fireActive();
+    await settle();
+    expect(c.rateLimited, isFalse);
+    expect(c.stale, isTrue);
+    server.status.remove('KGX');
+    final asked = server.requested.length;
+    await c.retry();
+    expect(server.requested.length, asked + 1);
+    expect(c.stale, isFalse);
   });
 
   group('concurrency', () {

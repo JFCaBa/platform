@@ -86,8 +86,13 @@ def _service(raw: dict) -> dict:
     }
 
 
+BUS_NOTICE = "Replacement buses are running from this station."
+
+
 def to_board(darwin: dict, crs: str, attribution: str, now: datetime) -> dict:
     messages = [strip_html(m.get("Value", "")) for m in darwin.get("nrccMessages") or []]
+    if darwin.get("busServices"):
+        messages.insert(0, BUS_NOTICE)
     return {
         "crs": crs,
         "name": darwin.get("locationName") or crs,

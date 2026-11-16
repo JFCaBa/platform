@@ -83,6 +83,16 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(b["nrccMessages"], [])
         self.assertEqual(b["name"], "Berkhamsted")
 
+    def test_replacement_buses_get_a_notice(self):
+        raw = board_with()
+        del raw["trainServices"]
+        raw["busServices"] = [svc(serviceType="bus")]
+        b = to_board(raw, "KGX", ATTR, NOW)
+        self.assertEqual(b["services"], [])
+        self.assertEqual(b["nrccMessages"][0], "Replacement buses are running from this station.")
+        self.assertNotIn("Replacement buses are running from this station.",
+                         to_board(board_with(svc()), "KGX", ATTR, NOW)["nrccMessages"])
+
     def test_nrcc_html_is_stripped(self):
         self.assertEqual(strip_html('<p>Delays <a href="x">here</a> &amp; there</p>'), "Delays here & there")
         self.assertEqual(strip_html("up to&nbsp;45 minutes"), "up to 45 minutes")

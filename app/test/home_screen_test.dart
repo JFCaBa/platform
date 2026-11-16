@@ -86,6 +86,26 @@ void main() {
     expect(find.text('Lifts out of order.'), findsOneWidget);
   });
 
+  testWidgets('alerts start open when there are no trains (e.g. replacement buses)', (tester) async {
+    server.boards['KGX'] = boardJson('KGX', clockNow, services: [], nrcc: ['Replacement buses are running from this station.']);
+    await pumpHome(tester);
+    expect(find.text('Replacement buses are running from this station.'), findsOneWidget);
+    expect(find.text('No departures in the next 2 hours'), findsOneWidget);
+  });
+
+  testWidgets('alerts open when a refresh leaves no trains', (tester) async {
+    server.boards['KGX'] = boardJson('KGX', clockNow, nrcc: ['Signal failure.']);
+    await pumpHome(tester);
+    expect(find.text('Signal failure.'), findsNothing);
+    server.boards['KGX'] = boardJson('KGX', clockNow, services: [], nrcc: ['Signal failure.']);
+    await tester.runAsync(() async {
+      timers.fireActive();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump();
+    expect(find.text('Signal failure.'), findsOneWidget);
+  });
+
   testWidgets('a single NRCC message reads "1 service alert"', (tester) async {
     server.boards['KGX'] = boardJson('KGX', clockNow, nrcc: ['Lifts out of order.']);
     await pumpHome(tester);

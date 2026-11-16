@@ -28,7 +28,7 @@ DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
 STATIONS_URL = "https://jfcaba.github.io/platform/stations.json"
 BUNDLED_STATIONS = Path(__file__).parent / "stations.json"
 ATTRIBUTION = "Data: National Rail"
-QUERY = "?numRows=20&timeWindow=120"
+QUERY = "?numRows=50&timeWindow=120"  # 20 rows cover only ~15 min at the busiest stations
 MAX_BODY = 1 << 20
 CRS_PATH = re.compile(r"^/departures/(.+)$")
 CRS_RE = re.compile(r"^[A-Z]{3}$")
@@ -148,12 +148,16 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             if crs not in self.server.stations:
                 return self.send_json(404, {"error": "unknown station"})
             if not slots.acquire(blocking=False):
-                return self.send_json(503, {"error": "busy"})
+                # 502, not 503: nginx caches it 5 s or serves the stale board; the app only
+                # backs off for minutes on a real Darwin 429.
+                return self.send_json(502, {"error": "busy"})
             try:
                 raw = fetch_darwin(f"{darwin_url}/{crs}{QUERY}", api_key, deadline_s)
                 board = to_board(raw, crs, attribution, datetime.now(timezone.utc))
             except Upstream as e:
                 log.write(f"upstream {crs} {e.status}\n")
+                if e.status == 429:
+                    return self.send_json(429, {"error": "rate limited"})
                 if e.status == 400:
                     return self.send_json(404, {"error": "unknown station"})
                 return self.send_json(502, {"error": "upstream"})

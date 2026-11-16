@@ -71,14 +71,12 @@ void main() {
       expect(requests.single.headers['User-Agent'], 'WhatPlatform/1.0');
     });
 
-    test('429 and 503 → RateLimited', () async {
-      for (final code in [429, 503]) {
-        await expectLater(client((_) async => http.Response('', code)).fetch('KGX'), throwsA(isA<RateLimited>()));
-      }
+    test('429 → RateLimited (only Darwin asking us to slow down)', () async {
+      await expectLater(client((_) async => http.Response('', 429)).fetch('KGX'), throwsA(isA<RateLimited>()));
     });
 
-    test('500, 502, 404 → DeparturesUnavailable', () async {
-      for (final code in [500, 502, 404]) {
+    test('500, 502, 503, 404 → DeparturesUnavailable', () async {
+      for (final code in [500, 502, 503, 404]) {
         await expectLater(client((_) async => http.Response('', code)).fetch('KGX'), throwsA(isA<DeparturesUnavailable>()));
       }
     });

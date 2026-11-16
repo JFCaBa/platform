@@ -152,7 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _Banner(updated, onRetry: c.retrying || c.rateLimited ? null : c.retry)
       else if (c.stale && !c.rateLimited)
         _Banner(updated, onRetry: c.retrying ? null : c.retry),
-      if (b.nrccMessages.isNotEmpty) _Alerts(b.nrccMessages),
+      if (b.nrccMessages.isNotEmpty) _Alerts(b.nrccMessages, initiallyOpen: b.services.isEmpty),
       if (!c.expired) ...[
         _FilterChips(destinations: c.destinations, selected: c.filters, onToggle: c.toggleFilter, onClear: c.clearFilters),
         const Divider(),
@@ -194,15 +194,24 @@ class _FilterChips extends StatelessWidget {
 
 /// Station messages from National Rail: one line, expanded on tap, so trains stay on the first screen.
 class _Alerts extends StatefulWidget {
-  const _Alerts(this.messages);
+  const _Alerts(this.messages, {this.initiallyOpen = false});
   final List<String> messages;
+
+  /// With no trains to show, the alerts are the answer (e.g. replacement buses).
+  final bool initiallyOpen;
 
   @override
   State<_Alerts> createState() => _AlertsState();
 }
 
 class _AlertsState extends State<_Alerts> {
-  bool _open = false;
+  late bool _open = widget.initiallyOpen;
+
+  @override
+  void didUpdateWidget(_Alerts old) {
+    super.didUpdateWidget(old);
+    if (widget.initiallyOpen && !old.initiallyOpen) _open = true; // the trains just disappeared
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -24,6 +24,7 @@ class FakeDarwin:
         self.inflight = 0
         self.max_inflight = 0
         self.keys = []
+        self.paths = []
         self.lock = threading.Lock()
         fake = self
 
@@ -37,8 +38,12 @@ class FakeDarwin:
                     fake.inflight += 1
                     fake.max_inflight = max(fake.max_inflight, fake.inflight)
                     fake.keys.append(self.headers.get("x-apikey"))
+                    fake.paths.append(self.path)
                 try:
-                    if fake.mode == "error":
+                    if fake.mode == "429":
+                        self.send_response(429)
+                        self.end_headers()
+                    elif fake.mode == "error":
                         self.send_response(500)
                         self.end_headers()
                     elif fake.mode == "sleep":
@@ -163,7 +168,17 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(json.loads(body), {"error": "unknown station"})
         self.assertEqual(self.darwin.requests, 0)
 
-    def test_concurrency_limit_503(self):
+    def test_darwin_429_passed_through(self):
+        self.darwin.mode = "429"
+        status, _, body = self.get("/departures/KGX")
+        self.assertEqual(status, 429)
+        self.assertEqual(json.loads(body), {"error": "rate limited"})
+
+    def test_asks_darwin_for_50_rows(self):
+        self.get("/departures/KGX")
+        self.assertIn("numRows=50", self.darwin.paths[0])
+
+    def test_concurrency_limit_502(self):
         self.darwin.mode = "slow"
         results = []
 
@@ -175,8 +190,8 @@ class ServerTest(unittest.TestCase):
             t.start()
         for t in threads:
             t.join()
-        self.assertIn(503, results)
-        self.assertEqual(results.count(200) + results.count(503), 9)
+        self.assertIn(502, results)  # busy: nginx caches 502 for 5 s / serves stale; never a 5-min client back-off
+        self.assertEqual(results.count(200) + results.count(502), 9)
         self.assertLessEqual(self.darwin.max_inflight, 8)
 
     def test_successful_requests_are_not_logged(self):
