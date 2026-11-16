@@ -1,0 +1,11 @@
+{"version":1,"generated":"2026-11-16","stations":[
+ {"crs":"BHM","name":"Birmingham New Street","lat":52.47782,"lon":-1.90021},
+ {"crs":"CLJ","name":"Clapham Junction","lat":51.46419,"lon":-0.17026},
+ {"crs":"EDB","name":"Edinburgh","lat":55.95239,"lon":-3.18823},
+ {"crs":"KGX","name":"London Kings Cross","lat":51.53088,"lon":-0.12293},
+ {"crs":"STP","name":"London St Pancras International","lat":51.53197,"lon":-0.12693},
+ {"crs":"YSM","name":"Ystrad Mynach","lat":51.64,"lon":-3.24},
+ {"crs":"XXA","name":"No coordinates"},
+ {"crs":"XXB","name":"Bad latitude","lat":200,"lon":0},
+ {"name":"No CRS","lat":51.5,"lon":-0.1}
+]}

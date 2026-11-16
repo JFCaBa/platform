@@ -1,0 +1,233 @@
+{
+ "crs": "KGX",
+ "name": "London Kings Cross",
+ "generatedAt": "2026-11-16T14:34:04Z",
+ "nrccMessages": [
+  "Trains running between Edinburgh and Newcastle may be cancelled in full, delayed by up to 45 minutes or revised to only run for part of their normal journey. More information can be found in the Disruptions area of the National Rail website (https://www.nationalrail.co.uk/service-disruptions/drem-20261115/).",
+  "Trains between Ely and Kings Lynn will be cancelled or revised. Latest information can be found in the Disruptions area of the National Rail website. (https://www.nationalrail.co.uk/service-disruptions/kings-lynn-20261116/)",
+  "The lifts are out of order between the footbridge and platforms 2 and 3 at London Kings Cross station. Step free access remains available via the main concourse."
+ ],
+ "attribution": "Data: National Rail",
+ "services": [
+  {
+   "std": "14:10",
+   "etd": "Delayed",
+   "platform": null,
+   "destination": "Leeds",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": "This service has been delayed by a fault with the signalling system earlier today",
+   "cancelReason": null
+  },
+  {
+   "std": "14:15",
+   "etd": "14:34",
+   "platform": null,
+   "destination": "Glasgow Queen Street",
+   "via": null,
+   "operator": "Lumo",
+   "cancelled": false,
+   "delayReason": "This service has been delayed by a fault with the signalling system earlier today",
+   "cancelReason": null
+  },
+  {
+   "std": "14:30",
+   "etd": "Cancelled",
+   "platform": null,
+   "destination": "Edinburgh",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": true,
+   "delayReason": null,
+   "cancelReason": "This service has been cancelled because of a fault with the signalling system earlier today"
+  },
+  {
+   "std": "14:33",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Newcastle",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "14:36",
+   "etd": "On time",
+   "platform": "10",
+   "destination": "Cambridge",
+   "via": null,
+   "operator": "Great Northern",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "14:40",
+   "etd": "On time",
+   "platform": "6",
+   "destination": "Harrogate",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "14:47",
+   "etd": "On time",
+   "platform": "0",
+   "destination": "Lincoln Central",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "14:54",
+   "etd": "Cancelled",
+   "platform": null,
+   "destination": "Kings Lynn",
+   "via": null,
+   "operator": "Great Northern",
+   "cancelled": true,
+   "delayReason": null,
+   "cancelReason": "This service has been cancelled because of a points failure"
+  },
+  {
+   "std": "15:00",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Sunderland",
+   "via": null,
+   "operator": "Grand Central",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:03",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Edinburgh",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:06",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Cambridge",
+   "via": null,
+   "operator": "Great Northern",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:10",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Leeds",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:24",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Kings Lynn",
+   "via": null,
+   "operator": "Great Northern",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:30",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Edinburgh",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:33",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Newcastle",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:36",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Cambridge",
+   "via": null,
+   "operator": "Great Northern",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:40",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Bradford Forster Square",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:47",
+   "etd": "On time",
+   "platform": null,
+   "destination": "York",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  },
+  {
+   "std": "15:54",
+   "etd": "Delayed",
+   "platform": null,
+   "destination": "Kings Lynn",
+   "via": null,
+   "operator": "Great Northern",
+   "cancelled": false,
+   "delayReason": "This service has been delayed by a points failure",
+   "cancelReason": null
+  },
+  {
+   "std": "16:00",
+   "etd": "On time",
+   "platform": null,
+   "destination": "Aberdeen",
+   "via": null,
+   "operator": "LNER",
+   "cancelled": false,
+   "delayReason": null,
+   "cancelReason": null
+  }
+ ]
+}
