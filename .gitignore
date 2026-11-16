@@ -1,0 +1,17 @@
+.env
+*.env
+__pycache__/
+*.pyc
+pipeline/out/
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.jks
+*.keystore
+key.properties
+*.mobileprovision
+*.p12
+.consenso/
+.superpowers/
+.DS_Store
