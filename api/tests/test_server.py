@@ -202,6 +202,30 @@ class StationsTest(unittest.TestCase):
         self.assertIn("KGX", known)
         self.assertGreater(len(known), 2400)
 
+    def test_main_starts_on_8510_with_key(self):
+        seen = {}
+
+        class Dummy:
+            server_address = ("0.0.0.0", 8510)
+            stations = {"KGX"}
+
+            def serve_forever(self):
+                pass
+
+        def fake_make(host, port, **kw):
+            seen.update(host=host, port=port, **kw)
+            return Dummy()
+
+        orig_make, orig_load = srv.make_server, srv.load_stations
+        srv.make_server, srv.load_stations = fake_make, lambda url, fb: {"KGX"}
+        try:
+            self.assertEqual(srv.main(env={"DARWIN_API_KEY": "k", "PORT": "9999"}), 0)
+        finally:
+            srv.make_server, srv.load_stations = orig_make, orig_load
+        self.assertEqual((seen["host"], seen["port"]), ("0.0.0.0", 8510))
+        self.assertEqual(seen["darwin_url"], srv.DARWIN_URL)
+        self.assertEqual(seen["api_key"], "k")
+
     def test_missing_key_exits_1(self):
         self.assertEqual(srv.main(env={}), 1)
 

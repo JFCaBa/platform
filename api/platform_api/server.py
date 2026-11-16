@@ -177,7 +177,8 @@ def main(env: dict | None = None) -> int:
         print("DARWIN_API_KEY missing", file=sys.stderr)
         return 1
     stations_url = env.get("STATIONS_URL", STATIONS_URL)
-    httpd = make_server("0.0.0.0", 8510,  # fixed inside the container; PORT is the host side darwin_url=env.get("DARWIN_URL", DARWIN_URL),
+    # Port fixed inside the container; PORT in .env only changes the host side (compose).
+    httpd = make_server("0.0.0.0", 8510, darwin_url=env.get("DARWIN_URL", DARWIN_URL),
                         api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS),
                         attribution=ATTRIBUTION)
 
