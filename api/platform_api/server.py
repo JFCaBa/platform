@@ -1,6 +1,6 @@
 """Platform API: GET /departures/{CRS} → next departures (Darwin, reshaped), GET /health.
 
-Privacy: logs only method, path and status (never client addresses).
+Privacy: requests are not logged; only Darwin failures (station code + reason).
 Load: at most `max_inflight` concurrent Darwin calls (more → 503); nginx caches 30 s
 per CRS in front of this.
 """
@@ -124,9 +124,8 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
         def log_message(self, fmt, *args):  # base class would log the client address
             pass
 
-        def log_request(self, code="-", size="-"):
-            log.write(f"{self.command} {self.path} {code}\n")
-            log.flush()
+        def log_request(self, code="-", size="-"):  # requests are not logged (privacy policy)
+            pass
 
         def send_json(self, status: int, body: dict, cache: str = "no-store"):
             data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()

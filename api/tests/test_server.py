@@ -179,12 +179,11 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(results.count(200) + results.count(503), 9)
         self.assertLessEqual(self.darwin.max_inflight, 8)
 
-    def test_no_client_ip_in_logs(self):
+    def test_successful_requests_are_not_logged(self):
         self.get("/departures/KGX")
+        self.get("/health")
         self.get("/nope")
-        out = self.log.getvalue()
-        self.assertIn("/departures/KGX 200", out)
-        self.assertNotIn("127.0.0.1", out)
+        self.assertEqual(self.log.getvalue(), "")
 
     def test_health_200(self):
         status, _, body = self.get("/health")
