@@ -15,14 +15,40 @@ String statusText(Departure d) {
 
 String? platformText(Departure d) => d.platform == null ? null : 'Plat ${d.platform}';
 
+/// Width that fits the widest time and status at the phone's text size, so the column
+/// never wraps ("16:2" / "3") and destinations line up in every row.
+double timeColumnWidth(BuildContext context, TextStyle? time, TextStyle? status) {
+  final scaler = MediaQuery.textScalerOf(context);
+  double w(String s, TextStyle? style) {
+    final p = TextPainter(text: TextSpan(text: s, style: style), textDirection: TextDirection.ltr, textScaler: scaler, maxLines: 1)
+      ..layout();
+    final width = p.width;
+    p.dispose();
+    return width;
+  }
+
+  const gap = 12.0; // space before the destination
+  return [w('00:00', time), for (final s in ['Exp 00:00', 'Cancelled', 'On time', 'Delayed']) w(s, status)]
+          .reduce((a, b) => a > b ? a : b) +
+      gap;
+}
+
 /// One departure: scheduled time and status on the left, destination in the middle,
 /// platform large on the right. Times are shown exactly as the API gives them.
 class DepartureRow extends StatelessWidget {
   const DepartureRow(this.d, {super.key});
   final Departure d;
 
+  /// Above this the time column and the platform badge no longer fit on a narrow phone.
+  static const maxTextScale = 1.5;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(
+        maxScaleFactor: maxTextScale,
+        child: Builder(builder: _row),
+      );
+
+  Widget _row(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final cancelled = d.cancelled || d.etd == 'Cancelled';
@@ -31,25 +57,24 @@ class DepartureRow extends StatelessWidget {
     final reason = cancelled ? d.cancelReason : d.delayReason;
     final plat = platformText(d);
     final muted = theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+    final stdStyle = theme.textTheme.titleLarge?.copyWith(
+      fontWeight: FontWeight.w700,
+      fontFeatures: const [FontFeature.tabularFigures()],
+      decoration: cancelled ? TextDecoration.lineThrough : null,
+      color: cancelled ? scheme.onSurfaceVariant : null,
+    );
+    final statusStyle = theme.textTheme.bodySmall?.copyWith(
+      color: late ? scheme.error : scheme.onSurfaceVariant,
+      fontWeight: late ? FontWeight.w600 : null,
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         SizedBox(
-          width: 76,
+          width: timeColumnWidth(context, stdStyle, statusStyle?.copyWith(fontWeight: FontWeight.w600)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(d.std,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  decoration: cancelled ? TextDecoration.lineThrough : null,
-                  color: cancelled ? scheme.onSurfaceVariant : null,
-                )),
-            if (status.isNotEmpty)
-              Text(status,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: late ? scheme.error : scheme.onSurfaceVariant,
-                    fontWeight: late ? FontWeight.w600 : null,
-                  )),
+            Text(d.std, style: stdStyle, maxLines: 1, softWrap: false),
+            if (status.isNotEmpty) Text(status, style: statusStyle, maxLines: 1, softWrap: false),
           ]),
         ),
         Expanded(
