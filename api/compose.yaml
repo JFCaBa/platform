@@ -1,0 +1,18 @@
+services:
+  platform-api:
+    build: .
+    image: platform-api
+    env_file: /opt/platform/.env
+    ports:
+      - "127.0.0.1:${PORT:-8510}:8510"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
