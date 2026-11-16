@@ -56,7 +56,7 @@ class _PlatformAppState extends State<PlatformApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF0F766E);
+    const seed = Color(0xFF1E3A8A);
     return MaterialApp(
       title: 'What Platform',
       debugShowCheckedModeBanner: false,
