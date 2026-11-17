@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
@@ -15,6 +16,10 @@ const _trainKey = 'follow_train';
 const _startedKey = 'follow_started_ms';
 const _stopButton = 'stop';
 const _pollEvery = Duration(seconds: 30);
+
+/// Monochrome status bar icon (res/drawable/ic_stat_train.xml); the app icon shows as a square.
+const _statusIcon = 'ic_stat_train';
+const _brand = Color(0xFF1E3A8A);
 
 /// Android: follows the train in a foreground service, so it keeps polling with the app closed.
 class FollowService extends ChangeNotifier implements Follower {
@@ -72,6 +77,7 @@ class FollowService extends ChangeNotifier implements Follower {
           notificationTitle: 'Following',
           notificationText: t.title,
           notificationButtons: const [NotificationButton(id: _stopButton, text: 'Stop')],
+          notificationIcon: const NotificationIcon(metaDataName: 'com.jfcaba.platform.FOLLOW_ICON', backgroundColor: _brand),
           callback: followCallback,
         );
         if (r is! ServiceRequestSuccess) {
@@ -138,13 +144,15 @@ class _FollowHandler extends TaskHandler {
       channelDescription: 'Platform, time and cancellation changes for the train you follow',
       importance: Importance.high,
       priority: Priority.high,
+      icon: _statusIcon,
+      color: _brand,
     ),
   );
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     await _notes.initialize(
-        settings: const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')));
+        settings: const InitializationSettings(android: AndroidInitializationSettings(_statusIcon)));
     final train = await _saved();
     final startedMs = await FlutterForegroundTask.getData<int>(key: _startedKey);
     if (train == null || startedMs == null) {

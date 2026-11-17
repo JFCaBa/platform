@@ -26,10 +26,13 @@
   <p>If you allow it, the app uses your location <strong>only on your phone</strong> to find the nearest station. Your location is never sent to us or to anyone else. You can say no and pick a station by hand.</p>
 
   <h2>What our server receives</h2>
-  <p>To show departures, the app asks our server for the departures of one station, identified by its three-letter code (for example <code>KGX</code>). That is all the request contains. Our server keeps no logs of these requests and does not record your IP address.</p>
+  <p>To show departures, the app asks our server for the departures of one station, identified by its three-letter code (for example <code>KGX</code>). To show a train's stops, it asks for that train by the code National Rail gives it for the day. That is all these requests contain. Our server keeps no logs of these requests and does not record your IP address.</p>
+
+  <h2>Following a train (Android)</h2>
+  <p>When you follow a train, your phone keeps asking our server for that station's departures every 30 seconds, in the same way as above, until the train leaves (at most 3 hours) or you tap Stop. Android shows a notification while this runs. The alerts about platform, time or cancellation changes are created on your phone; nothing is sent to us to receive them, and we never know which train you follow.</p>
 
   <h2>What stays on your phone</h2>
-  <p>The last station you looked at and your destination filters are stored on your phone so the app opens where you left it. They never leave the device. Deleting the app deletes them.</p>
+  <p>The last station you looked at, your destination filters and the train you follow are stored on your phone so the app opens where you left it. They never leave the device. Deleting the app deletes them.</p>
 
   <h2>Data sources</h2>
   <p>Train times: National Rail (Darwin, via the Rail Data Marketplace). Station locations: NaPTAN, Department for Transport, Open Government Licence.</p>
@@ -37,7 +40,7 @@
   <h2>Contact</h2>
   <p>Questions: open an issue at <a href="https://github.com/JFCaBa/platform/issues">github.com/JFCaBa/platform</a>.</p>
 
-  <p class="muted">Last updated 16 November 2026.</p>
+  <p class="muted">Last updated 17 November 2026.</p>
 </main>
 </body>
 </html>

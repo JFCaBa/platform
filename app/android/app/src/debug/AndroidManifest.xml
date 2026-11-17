@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Debug only: end-to-end tests against a local fake API over http (never in release). -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>
