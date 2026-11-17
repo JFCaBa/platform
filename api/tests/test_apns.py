@@ -184,20 +184,36 @@ class ApnsTest(unittest.TestCase):
         self.assertEqual(auth[0], auth[1])  # cached until the 403
         self.assertNotEqual(auth[1], auth[2])
 
-    def test_other_403_keeps_cached_jwt(self):
-        a = self.apns()
+    def _send_at(self, a, dt, status, reason):
+        self.now += dt
+        self.status, self.reason = status, reason
         a.send("ab" * 32, "production", "t", "b")
-        self.now += 1
-        self.status, self.reason = 403, "InvalidProviderToken"
-        a.send("ab" * 32, "production", "t", "b")
-        self.now += 1
-        self.status, self.reason = 200, None
-        a.send("ab" * 32, "production", "t", "b")
-        auth = [r.headers["authorization"] for r in self.requests]
-        self.assertEqual(auth[0], auth[1])
-        self.assertEqual(auth[1], auth[2])  # no token churn (TooManyProviderTokenUpdates)
+        return self.requests[-1].headers["authorization"]
 
-    def test_network_error_retries_once_then_ok(self):
+    def test_other_403_renews_jwt_once_then_bounded_to_20_min(self):
+        a = self.apns()
+        first = self._send_at(a, 0, 200, None)
+        self.assertEqual(self._send_at(a, 1, 403, "InvalidProviderToken"), first)
+        second = self._send_at(a, 1, 200, None)
+        self.assertNotEqual(second, first)  # skew-style 403 heals
+        self.assertEqual(self._send_at(a, 1, 403, "InvalidProviderToken"), second)
+        self.assertEqual(self._send_at(a, 1, 200, None), second)  # within 20 min: kept
+        self.assertEqual(self._send_at(a, 20 * 60, 403, "InvalidProviderToken"), second)
+        self.assertNotEqual(self._send_at(a, 1, 200, None), second)  # after 20 min: may refresh
+
+    def test_read_timeout_is_not_retried(self):
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            raise httpx.ReadTimeout("slow")
+
+        a = Apns(self.pem, "K", "T", clock=self.clock, transport=httpx.MockTransport(handler),
+                 log=io.StringIO())
+        self.assertEqual(a.send("ab" * 32, "production", "t", "b"), "error")
+        self.assertEqual(len(calls), 1)
+
+    def test_connect_error_retries_once_then_ok(self):
         calls = []
 
         def handler(request):

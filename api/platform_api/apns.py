@@ -18,6 +18,7 @@ HOSTS = {
     "production": "api.push.apple.com",
     "sandbox": "api.sandbox.push.apple.com",
 }
+FORCED_REFRESH_GAP = 20 * 60  # min gap between JWT drops caused by non-expiry 403s
 JWT_TTL = 50 * 60  # Apple requires a refresh between 20 and 60 minutes
 EXPIRATION_SECONDS = 600
 MAX_PAYLOAD = 4096
@@ -63,6 +64,7 @@ class Apns:
         self._client = httpx.Client(http2=True, timeout=10, transport=transport)
         self._jwt: Optional[str] = None
         self._jwt_at = 0.0
+        self._forced_at: Optional[float] = None
         self._lock = threading.Lock()
         self._log = log
 
@@ -95,9 +97,17 @@ class Apns:
                 self._jwt_at = now
             return self._jwt
 
-    def _drop_token(self) -> None:
+    def _drop_token(self, expired: bool) -> None:
+        """Expired token: always renew. Any other 403 (e.g. clock skew): renew at most once per
+        FORCED_REFRESH_GAP, so a bad key cannot cause TooManyProviderTokenUpdates."""
         with self._lock:
-            self._jwt = None
+            now = self._clock()
+            if expired:
+                self._jwt = None
+            elif (self._forced_at is None or now < self._forced_at
+                  or now - self._forced_at >= FORCED_REFRESH_GAP):
+                self._jwt = None
+                self._forced_at = now
 
     def _note(self, line: str) -> None:
         try:
@@ -107,8 +117,8 @@ class Apns:
 
     def send(self, token: str, env: str, title: str, body: str) -> str:
         """Returns "ok", "gone" (token no longer valid) or "error". Never raises.
-        No apns-collapse-id: every alert stays on the lock screen. One immediate retry on a
-        network exception only, never on an HTTP status."""
+        No apns-collapse-id: every alert stays on the lock screen. One immediate retry only when the
+        request certainly wasn't sent (connect error/timeout, pool timeout), never on an HTTP status."""
         try:
             payload = build_payload(title, body)
             if payload is None:
@@ -126,7 +136,7 @@ class Apns:
             url = f"https://{host}/3/device/{token}"
             try:
                 r = self._client.post(url, content=payload, headers=headers)
-            except httpx.TransportError:
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):  # certainly not sent
                 r = self._client.post(url, content=payload, headers=headers)
         except Exception as e:
             self._note(f"apns network {type(e).__name__}")
@@ -139,8 +149,8 @@ class Apns:
         except Exception:
             pass
         self._note(f"apns {r.status_code} {reason}")
-        if r.status_code == 403 and reason == "ExpiredProviderToken":
-            self._drop_token()  # other 403s keep it: renewing too often is TooManyProviderTokenUpdates
+        if r.status_code == 403:
+            self._drop_token(reason == "ExpiredProviderToken")
         if r.status_code == 410:
             return "gone"
         if r.status_code == 400 and reason in GONE_REASONS:
