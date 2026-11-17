@@ -103,20 +103,24 @@ class FollowStore:
         self._gen = 0
         self._epochs: dict[str, int] = {}  # insertion-ordered: oldest bump first
         self._epoch_ctr = 0
+        self._floor = 0  # value of the last pruned entry; tokens not in the map read this
 
     def epoch(self, token: str) -> int:
         with self._lock:
-            return self._epochs.get(token, 0)
+            return self._epochs.get(token, self._floor)
 
     def _bump(self, token: str) -> None:
         """Caller holds the lock. Values come from one store-wide counter, so they never repeat.
-        Dropping the oldest entry is safe: its epoch becomes 0, which differs from any value
-        read while it existed."""
+        Pruning drops the oldest entry and raises `_floor` to its value; every token not in the
+        map then reads the floor. A pruned token's epoch never goes back to a value read before
+        its last bump (the floor is at least that bump), so a pruned DELETE still wins. A
+        rising floor can only make an in-flight POST of an unlisted token stale (safe side)."""
         self._epoch_ctr += 1
         self._epochs.pop(token, None)
         self._epochs[token] = self._epoch_ctr
         while len(self._epochs) > self.MAX_EPOCHS:
-            del self._epochs[next(iter(self._epochs))]
+            oldest = next(iter(self._epochs))
+            self._floor = self._epochs.pop(oldest)
 
     def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float,
                expect_epoch: int | None = None) -> str:
@@ -126,7 +130,7 @@ class FollowStore:
         if not isinstance(crs, str) or not crs:
             raise ValueError("train needs a non-empty crs")
         with self._lock:
-            if expect_epoch is not None and self._epochs.get(token, 0) != expect_epoch:
+            if expect_epoch is not None and self._epochs.get(token, self._floor) != expect_epoch:
                 return "stale"
             cur = self._follows.get(token)
             if cur is not None and _same_train(cur.train, train):

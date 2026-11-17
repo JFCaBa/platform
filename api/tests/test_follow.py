@@ -203,6 +203,16 @@ class FollowStoreTest(unittest.TestCase):
         self.assertLessEqual(len(s._epochs), FollowStore.MAX_EPOCHS)
         self.assertNotEqual(s.epoch(f"t{FollowStore.MAX_EPOCHS + 49}"), 0)
 
+    def test_pruned_delete_still_wins(self):
+        s = FollowStore()
+        e = s.epoch("aa")  # a first-follow POST reads the epoch of an unknown token
+        s.remove("aa")     # DELETE meanwhile
+        for i in range(FollowStore.MAX_EPOCHS + 1):  # "aa" is pruned from the map
+            s.remove(f"t{i}")
+        self.assertNotIn("aa", s._epochs)
+        self.assertEqual(s.upsert("aa", "production", train(), {}, 1.0, expect_epoch=e), "stale")
+        self.assertEqual(len(s), 0)
+
     def test_is_same_checks_env_when_given(self):
         s = FollowStore()
         s.upsert("aa", "production", train(), {}, 1.0)
