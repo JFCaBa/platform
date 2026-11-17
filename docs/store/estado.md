@@ -63,3 +63,4 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 - 17-11-2026 ~21:50: Push Notifications activado en el App ID com.jfcaba.platform. No se pudo crear clave APNs nueva (límite de 2 claves team-scoped Sandbox & Production en 338 TAC):
   se reutiliza la de Matchday (Key ID SAZJXCZQW3, fichero en /home/ubuntu/matchday-secrets/apns-key.p8 del mismo VPS). Revocarla rompería Matchday y What Platform a la vez.
   APNS_* añadidos a /opt/platform/.env (copia previa .env.bak-202611172048, 600 root). Log: `follow: on`. POST {} → 400, tren inexistente → 410, DELETE → 204.
+- 17-11-2026: prueba real en iPhone 11 (iOS 27.0.1, build release firmada para desarrollo → sandbox): seguido el 21:18 KGX→Ely desde España; a las 21:12 UK le asignan andén 0 y llega el aviso "21:18 to Ely / Platform 0" con la app cerrada. ✅
