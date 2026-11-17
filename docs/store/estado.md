@@ -74,3 +74,9 @@ Código en main (1.2.0+8), servidor desplegado con `follow: on`, prueba real OK.
 5. Captura nueva opcional con la campanita en una fila.
 6. Enviar a revisión: lo pulsa el usuario.
 Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de Play. Pruebas reales pendientes de "Now expected …" y "Cancelled" (Paulo).
+
+## Límites de Darwin en Rail Data Marketplace (consultado 17-11-2026, pestaña Licence de cada producto)
+- Live Departure Board (P-d81d6eaf…, v1.1) y Service Details (P-4dec1247…): licencia Open, Charging model **Free**, **Fair usage limit: No**, sin SLA; atribución "National Rail" (la API ya la manda).
+- Condición especial: no revender los datos tal cual; uso comercial solo si se aumentan o integran (la app sí: estación más cercana, filtros, paradas, avisos).
+- No hay cuota publicada ni cabeceras de límite en las respuestas. En la práctica el gateway aplica un "spike arrest" de ~100 peticiones/segundo (error 429 visto por usuarios en dic-2025/ene-2026, openraildata-talk). Cifra antigua de OpenLDBWS (no RDM): 5 millones / 4 semanas.
+- Nuestro máximo: sondeo de avisos ≤ 100/min + paneles detrás de la caché de 30 s de nginx → muy por debajo. Ante 429: app y servidor esperan 5 min.
