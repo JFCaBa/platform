@@ -90,6 +90,9 @@ class FollowStore:
         self._gen = 0
 
     def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float) -> str:
+        crs = train.get("crs")
+        if not isinstance(crs, str) or not crs:
+            raise ValueError("train needs a non-empty crs")
         with self._lock:
             cur = self._follows.get(token)
             if cur is not None and _same_train(cur.train, train):

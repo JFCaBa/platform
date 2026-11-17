@@ -160,6 +160,13 @@ class FollowStoreTest(unittest.TestCase):
             with self.assertRaises(TypeError):
                 s.update("aa", gen, **{k: 1})
 
+    def test_upsert_requires_crs(self):
+        s = FollowStore()
+        for bad in ({}, {"crs": ""}, {"crs": None}, {"crs": 5}):
+            with self.assertRaises(ValueError):
+                s.upsert("aa", "production", {**train(), **bad} if bad else {"std": "08:12"}, {}, 1.0)
+        self.assertEqual(len(s), 0)
+
     def test_remove_without_gen(self):
         s = FollowStore()
         s.upsert("aa", "production", train(), {}, 1.0)
