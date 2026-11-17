@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import sys
 import threading
+import time
 from dataclasses import dataclass
+from typing import Callable, TextIO
 
 from .board import HHMM
 
@@ -52,6 +56,10 @@ def changes(before: dict, after: dict) -> list[str]:
             out.append("Delayed")
     return out
 
+
+MAX_DURATION = 3 * 3600
+CANCELLED_LINGER = 120
+RATE_LIMIT_PAUSE = 300
 
 _UPDATABLE = {"last", "cancelled_at", "missing"}
 _SAME_KEYS = ("crs", "std", "destination", "serviceId")
@@ -141,3 +149,79 @@ class FollowStore:
     def __len__(self) -> int:
         with self._lock:
             return len(self._follows)
+
+
+def collapse_id(token: str, train: dict) -> str:
+    key = f"{token}{train.get('crs')}{train.get('std')}{train.get('destination')}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+class Poller:
+    """Polls each followed station's board once per tick and pushes what changed. Follows are read
+    as copies, boards fetched and pushes sent outside the store lock, and results written back by
+    generation, so a DELETE or replacement made meanwhile wins."""
+
+    def __init__(self, store: FollowStore, fetch_board: Callable[[str], dict], push,
+                 clock: Callable[[], float] = time.time, log: TextIO = sys.stderr) -> None:
+        self._store = store
+        self._log = log
+        self._fetch = fetch_board
+        self._push = push
+        self._clock = clock
+        self._paused_until = 0.0
+
+    def tick(self) -> None:
+        now = self._clock()
+        self._expire(now)
+        if now < self._paused_until:
+            return
+        for crs in sorted(self._store.stations()):
+            try:
+                board = self._fetch(crs)
+            except Exception as e:  # Darwin/network errors are silent; follows kept as they are
+                if getattr(e, "status", None) == 429:
+                    self._paused_until = now + RATE_LIMIT_PAUSE
+                    return
+                continue
+            for f in self._store.for_station(crs):
+                self._check(f, board, now)
+
+    def _expire(self, now: float) -> None:
+        for crs in self._store.stations():
+            for f in self._store.for_station(crs):
+                if now - f.started >= MAX_DURATION or (
+                        f.cancelled_at is not None and now - f.cancelled_at >= CANCELLED_LINGER):
+                    self._store.remove(f.token, f.gen)
+
+    def _check(self, f: Follow, board: dict, now: float) -> None:
+        d = find_followed(board, f.train)
+        if d is None:
+            if f.missing + 1 >= 2:
+                self._store.remove(f.token, f.gen)
+            else:
+                self._store.update(f.token, f.gen, missing=f.missing + 1)
+            return
+        if is_cancelled(d):
+            cancelled_at = f.cancelled_at if f.cancelled_at is not None else now
+        else:
+            cancelled_at = None
+        texts = changes(f.last or {}, d)
+        if texts:
+            title = f"{f.train.get('std')} to {f.train.get('destination')}"
+            result = self._push.send(f.token, f.env, title, "\n".join(texts), collapse_id(f.token, f.train))
+            if result == "gone":
+                self._store.remove(f.token, f.gen)
+                return
+        # Best effort: `last` advances even when the push failed, so an alert is never repeated.
+        self._store.update(f.token, f.gen, last=d, cancelled_at=cancelled_at, missing=0)
+
+    def run(self, stop: threading.Event, every: float = 30.0) -> None:
+        while not stop.is_set():
+            try:
+                self.tick()
+            except Exception as e:  # keep the thread alive; never log tokens
+                try:
+                    self._log.write(f"follow poller: {type(e).__name__}\n")
+                except Exception:
+                    pass
+            stop.wait(every)

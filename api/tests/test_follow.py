@@ -174,5 +174,280 @@ class FollowStoreTest(unittest.TestCase):
         self.assertEqual(len(s), 0)
 
 
+TOKEN = "ab" * 32
+TOKEN2 = "cd" * 32
+T0 = 1_000_000.0
+
+
+class Clock:
+    def __init__(self, t=T0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class Boards:
+    """Fake fetch_board: returns the board set for a CRS, or raises the exception set for it."""
+
+    def __init__(self):
+        self.boards: dict[str, object] = {}
+        self.calls: list[str] = []
+
+    def set(self, crs, *services):
+        self.boards[crs] = {"crs": crs, "services": list(services)}
+
+    def __call__(self, crs):
+        self.calls.append(crs)
+        b = self.boards.get(crs)
+        if isinstance(b, BaseException):
+            raise b
+        if b is None:
+            raise RuntimeError("no board")
+        return b
+
+
+class Push:
+    def __init__(self, result="ok", hook=None):
+        self.result = result
+        self.hook = hook
+        self.sent: list[tuple] = []
+
+    def send(self, token, env, title, body, collapse_id):
+        self.sent.append((token, env, title, body, collapse_id))
+        if self.hook:
+            self.hook()
+        return self.result
+
+
+class RateLimited(Exception):
+    status = 429
+
+
+class Upstream(Exception):
+    status = 502
+
+
+def collapse(token=TOKEN, crs="CDF", std="08:12", dest="Cardiff Central"):
+    import hashlib
+    return hashlib.sha256((token + crs + std + dest).encode()).hexdigest()[:16]
+
+
+class PollerTest(unittest.TestCase):
+    def setUp(self):
+        from platform_api.follow import Poller
+        self.store = FollowStore()
+        self.boards = Boards()
+        self.push = Push()
+        self.clock = Clock()
+        self.poller = Poller(self.store, self.boards, self.push, clock=self.clock)
+
+    def follow(self, token=TOKEN, t=None, baseline=None, started=None):
+        t = t or train()
+        base = baseline if baseline is not None else dep(std=t["std"], dest=t["destination"], platform="3", etd="On time")
+        self.store.upsert(token, "production", t, base, self.clock.t if started is None else started)
+
+    def only(self, crs="CDF"):
+        (f,) = self.store.for_station(crs)
+        return f
+
+    def test_alert_on_platform_change(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(self.push.sent, [(TOKEN, "production", "08:12 to Cardiff Central",
+                                           "Platform changed: 3 → 5", collapse())])
+        self.assertEqual(self.only().last["platform"], "5")
+
+    def test_two_changes_one_push_joined_by_newline(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="08:19"))
+        self.poller.tick()
+        self.assertEqual(len(self.push.sent), 1)
+        self.assertEqual(self.push.sent[0][3], "Platform changed: 3 → 5\nNow expected 08:19")
+        self.assertEqual(self.push.sent[0][4], collapse())
+        self.boards.set("CDF", dep(platform="6", etd="08:19"))
+        self.poller.tick()
+        self.assertEqual(self.push.sent[1][4], collapse())
+
+    def test_no_alert_when_unchanged(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="3", etd="On time"))
+        self.poller.tick()
+        self.poller.tick()
+        self.assertEqual(self.push.sent, [])
+        self.assertEqual(len(self.store), 1)
+
+    def test_one_fetch_per_station(self):
+        self.follow(TOKEN)
+        self.follow(TOKEN2)
+        self.follow("ef" * 32, t=train(crs="NWP"))
+        self.boards.set("CDF", dep(platform="3", etd="On time"))
+        self.boards.set("NWP", dep(platform="3", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(sorted(self.boards.calls), ["CDF", "NWP"])
+
+    def test_missing_once_keeps_twice_ends(self):
+        self.follow()
+        self.boards.set("CDF", dep(std="09:00"))
+        self.poller.tick()
+        self.assertEqual(self.only().missing, 1)
+        self.boards.set("CDF", dep(platform="3", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(self.only().missing, 0)  # a reading with the train resets the count
+        self.boards.set("CDF", dep(std="09:00"))
+        self.poller.tick()
+        self.assertEqual(len(self.store), 1)
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+        self.assertEqual(self.push.sent, [])
+
+    def test_cancelled_ends_after_two_minutes(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="3", etd="Cancelled", cancelled=True, cancel_reason="a fault"))
+        self.poller.tick()
+        self.assertEqual([s[3] for s in self.push.sent], ["Cancelled: a fault"])
+        self.assertEqual(self.only().cancelled_at, T0)
+        self.clock.t = T0 + 60
+        self.poller.tick()
+        self.assertEqual(self.only().cancelled_at, T0)  # earliest kept
+        self.clock.t = T0 + 119
+        self.poller.tick()
+        self.assertEqual(len(self.store), 1)
+        self.clock.t = T0 + 120
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+        self.assertEqual(len(self.push.sent), 1)
+
+    def test_cancellation_taken_back_clears_linger(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="3", etd="Cancelled", cancelled=True))
+        self.poller.tick()
+        self.clock.t = T0 + 30
+        self.boards.set("CDF", dep(platform="3", etd="08:20"))
+        self.poller.tick()
+        self.assertIsNone(self.only().cancelled_at)
+        self.clock.t = T0 + 600
+        self.poller.tick()
+        self.assertEqual(len(self.store), 1)
+
+    def test_three_hours_ends(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="3", etd="On time"))
+        self.clock.t = T0 + 3 * 3600 - 1
+        self.poller.tick()
+        self.assertEqual(len(self.store), 1)
+        self.clock.t = T0 + 3 * 3600
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+        self.assertEqual(self.push.sent, [])
+
+    def test_expiry_runs_during_429_pause(self):
+        self.follow(started=T0 - 3 * 3600 + 100)
+        self.boards.boards["CDF"] = RateLimited()
+        self.poller.tick()
+        self.assertEqual(len(self.store), 1)
+        self.clock.t = T0 + 100
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+        self.assertEqual(self.boards.calls, ["CDF"])
+
+    def test_expiry_runs_during_upstream_errors(self):
+        self.follow()
+        self.boards.set("CDF", dep(platform="3", etd="Cancelled", cancelled=True))
+        self.poller.tick()
+        self.boards.boards["CDF"] = Upstream()
+        self.clock.t = T0 + 120
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+        self.follow()
+        self.clock.t += 3 * 3600
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+
+    def test_gone_token_removed(self):
+        self.push.result = "gone"
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+
+    def test_push_error_keeps_follow_and_advances_last(self):
+        self.push.result = "error"
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(self.only().last["platform"], "5")
+        self.poller.tick()
+        self.assertEqual(len(self.push.sent), 1)  # not resent
+
+    def test_replaced_during_send_survives(self):
+        other = train(crs="NWP", std="09:00", dest="Swansea")
+        self.push.hook = lambda: self.store.upsert(TOKEN, "sandbox", other, {"platform": "1"}, T0 + 5)
+        self.push.result = "gone"
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        f = self.only("NWP")
+        self.assertEqual((f.env, f.train, f.last, f.started, f.missing, f.cancelled_at),
+                         ("sandbox", other, {"platform": "1"}, T0 + 5, 0, None))
+
+    def test_deleted_during_send_not_recreated(self):
+        self.push.hook = lambda: self.store.remove(TOKEN)
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(len(self.store), 0)
+
+    def test_upstream_error_silent(self):
+        self.follow()
+        self.boards.boards["CDF"] = Upstream()
+        self.poller.tick()
+        self.poller.tick()
+        self.boards.boards["CDF"] = OSError("network")
+        self.poller.tick()
+        f = self.only()
+        self.assertEqual((f.missing, f.last["platform"]), (0, "3"))
+        self.assertEqual(self.push.sent, [])
+
+    def test_429_pauses_five_minutes(self):
+        self.follow()
+        self.follow("ef" * 32, t=train(crs="NWP"))
+        self.boards.boards["CDF"] = RateLimited()
+        self.boards.boards["NWP"] = RateLimited()
+        self.poller.tick()
+        self.assertEqual(len(self.boards.calls), 1)  # stops at the first 429
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.boards.set("NWP", dep(platform="5", etd="On time"))
+        self.clock.t = T0 + 299
+        self.poller.tick()
+        self.assertEqual(len(self.boards.calls), 1)
+        self.clock.t = T0 + 300
+        self.poller.tick()
+        self.assertEqual(len(self.boards.calls), 3)
+        self.assertEqual(len(self.push.sent), 2)
+
+    def test_run_survives_tick_errors_and_stops(self):
+        import threading
+        stop = threading.Event()
+        calls = []
+
+        def bad_tick():
+            calls.append(1)
+            if len(calls) >= 3:
+                stop.set()
+            raise ValueError("boom")
+
+        import io
+        from platform_api.follow import Poller
+        log = io.StringIO()
+        p = Poller(self.store, self.boards, self.push, clock=self.clock, log=log)
+        p.tick = bad_tick
+        p.run(stop, every=0.001)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(log.getvalue(), "follow poller: ValueError\n" * 3)
+
+
 if __name__ == "__main__":
     unittest.main()
