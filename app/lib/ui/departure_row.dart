@@ -26,7 +26,7 @@ double timeColumnWidth(BuildContext context, TextStyle? time, TextStyle? status)
 /// One departure: scheduled time and status on the left, destination in the middle,
 /// platform large on the right. Times are shown exactly as the API gives them.
 class DepartureRow extends StatelessWidget {
-  const DepartureRow(this.d, {super.key, this.followed = false, this.onTap});
+  const DepartureRow(this.d, {super.key, this.followed = false, this.onTap, this.onLongPress});
   final Departure d;
 
   /// This is the train being followed: shows a bell.
@@ -34,6 +34,7 @@ class DepartureRow extends StatelessWidget {
 
   /// Null: the row is not tappable.
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   /// Above this the time column and the platform badge no longer fit on a narrow phone.
   static const maxTextScale = 1.5;
@@ -41,7 +42,7 @@ class DepartureRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final row = MediaQuery.withClampedTextScaling(maxScaleFactor: maxTextScale, child: Builder(builder: _row));
-    return onTap == null ? row : InkWell(onTap: onTap, child: row);
+    return onTap == null && onLongPress == null ? row : InkWell(onTap: onTap, onLongPress: onLongPress, child: row);
   }
 
   Widget _row(BuildContext context) {

@@ -21,10 +21,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Collection, TextIO
 
-from .board import to_board
+from .board import to_board, to_stops
 
 DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
               "/LDBWS/api/20220120/GetDepartureBoard")
+SERVICE_URL = ("https://api1.raildata.org.uk/1010-service-details1_2"
+               "/LDBWS/api/20220120/GetServiceDetails")
 STATIONS_URL = "https://jfcaba.github.io/platform/stations.json"
 BUNDLED_STATIONS = Path(__file__).parent / "stations.json"
 ATTRIBUTION = "Data: National Rail"
@@ -32,6 +34,8 @@ QUERY = "?numRows=50&timeWindow=120"  # 20 rows cover only ~15 min at the busies
 MAX_BODY = 1 << 20
 CRS_PATH = re.compile(r"^/departures/(.+)$")
 CRS_RE = re.compile(r"^[A-Z]{3}$")
+SERVICE_PATH = re.compile(r"^/service/(.*)$")
+SERVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,40}$")  # e.g. 10741504KNGX____
 USER_AGENT = "platform-api/1.0"
 
 
@@ -112,9 +116,11 @@ class _Server(ThreadingHTTPServer):
 
 
 def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations: Collection[str],
-                attribution: str, deadline_s: float = 8.0, max_inflight: int = 8,
+                attribution: str, service_url: str | None = None, service_key: str | None = None, deadline_s: float = 8.0, max_inflight: int = 8,
                 log: TextIO = sys.stderr) -> ThreadingHTTPServer:
     slots = threading.BoundedSemaphore(max_inflight)
+    # Stop lookups have their own, smaller pool: they must never leave the boards without a slot.
+    service_slots = threading.BoundedSemaphore(max(1, max_inflight // 2))
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "platform-api"
@@ -136,9 +142,36 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             self.end_headers()
             self.wfile.write(data)
 
+        def service(self, sid: str):
+            if not SERVICE_ID_RE.match(sid):
+                return self.send_json(400, {"error": "bad service id"})
+            if not (service_url and service_key):
+                return self.send_json(503, {"error": "unavailable"})
+            if not service_slots.acquire(blocking=False):
+                return self.send_json(502, {"error": "busy"})
+            try:
+                raw = fetch_darwin(f"{service_url}/{sid}", service_key, deadline_s)
+                body = to_stops(raw, attribution, datetime.now(timezone.utc))
+            except Upstream as e:
+                log.write(f"upstream service {e.status}\n")
+                if e.status == 429:
+                    return self.send_json(429, {"error": "rate limited"})
+                if e.status in (400, 404):
+                    return self.send_json(404, {"error": "unknown service"})
+                return self.send_json(502, {"error": "upstream"})
+            except (AttributeError, TypeError, ValueError, KeyError) as e:
+                log.write(f"upstream service bad shape {type(e).__name__}\n")
+                return self.send_json(502, {"error": "upstream"})
+            finally:
+                service_slots.release()
+            self.send_json(200, body, cache="max-age=30")
+
         def do_GET(self):
             if self.path == "/health":
                 return self.send_json(200, {"ok": True})
+            sm = SERVICE_PATH.match(self.path)
+            if sm:
+                return self.service(sm.group(1))
             m = CRS_PATH.match(self.path)
             if not m:
                 return self.send_json(404, {"error": "not found"})
@@ -183,6 +216,8 @@ def main(env: dict | None = None) -> int:
     # Port fixed inside the container; PORT in .env only changes the host side (compose).
     httpd = make_server("0.0.0.0", 8510, darwin_url=env.get("DARWIN_URL", DARWIN_URL),
                         api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS),
+                        service_url=env.get("SERVICE_URL", SERVICE_URL),
+                        service_key=env.get("DARWIN_SERVICE_KEY", "").strip() or None,
                         attribution=ATTRIBUTION)
 
     def refresh():

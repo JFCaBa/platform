@@ -3,8 +3,9 @@ import 'package:platform_app/data/departures.dart';
 import 'package:platform_app/follow/follow_logic.dart';
 
 Departure dep({String std = '08:12', String dest = 'Cardiff Central', String? etd, String? platform,
-        bool cancelled = false, String? cancelReason}) =>
-    Departure(std: std, etd: etd, platform: platform, destination: dest, cancelled: cancelled, cancelReason: cancelReason);
+        bool cancelled = false, String? cancelReason, String? id}) =>
+    Departure(std: std, etd: etd, platform: platform, destination: dest, cancelled: cancelled, cancelReason: cancelReason,
+        serviceId: id);
 
 Board board(String crs, List<Departure> services) => Board(
     crs: crs, generatedAt: DateTime.utc(2026, 11, 17, 8), nrccMessages: const [], attribution: 'x', services: services);
@@ -16,6 +17,16 @@ void main() {
     expect(t.matches(dep(etd: '08:19', platform: '5')), isTrue);
     expect(t.matches(dep(std: '08:13')), isFalse);
     expect(t.matches(dep(dest: 'Swansea')), isFalse);
+  });
+
+  test('with a serviceId, two trains at the same time to the same place are told apart', () {
+    const byId = FollowedTrain(crs: 'CDF', std: '08:12', destination: 'Cardiff Central', serviceId: 'A1');
+    expect(byId.matches(dep(id: 'A1')), isTrue);
+    expect(byId.matches(dep(id: 'B2')), isFalse);
+    expect(byId.matches(dep()), isTrue); // the board lost ids: fall back to time and destination
+    expect(findFollowed(board('CDF', [dep(id: 'B2', platform: '1'), dep(id: 'A1', platform: '2')]), byId)?.platform, '2');
+    expect(FollowedTrain.fromJson(byId.toJson()), byId);
+    expect(FollowedTrain.fromJson(t.toJson()).serviceId, isNull);
   });
 
   test('findFollowed only on its station', () {

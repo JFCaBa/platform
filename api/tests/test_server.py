@@ -13,6 +13,7 @@ from platform_api import server as srv  # noqa: E402
 
 FIX = Path(__file__).parent / "fixtures"
 KGX = (FIX / "darwin_kgx.json").read_bytes()
+SERVICE = (FIX / "darwin_service.json").read_bytes()
 
 
 class FakeDarwin:
@@ -71,11 +72,16 @@ class FakeDarwin:
                     else:
                         if fake.mode == "slow":
                             time.sleep(1.5)
+                        if fake.mode == "badid" and "GetServiceDetails" in self.path:
+                            self.send_response(400)
+                            self.end_headers()
+                            return
+                        body = SERVICE if "GetServiceDetails" in self.path else KGX
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(KGX)))
+                        self.send_header("Content-Length", str(len(body)))
                         self.end_headers()
-                        self.wfile.write(KGX)
+                        self.wfile.write(body)
                 except OSError:
                     pass
                 finally:
@@ -88,7 +94,9 @@ class FakeDarwin:
 
         self.httpd = S(("127.0.0.1", 0), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/LDBWS/api/20220120/GetDepartureBoard"
+        base = f"http://127.0.0.1:{self.httpd.server_address[1]}/LDBWS/api/20220120"
+        self.url = f"{base}/GetDepartureBoard"
+        self.service_url = f"{base}/GetServiceDetails"
 
 
 class ServerTest(unittest.TestCase):
@@ -96,6 +104,7 @@ class ServerTest(unittest.TestCase):
         self.darwin = FakeDarwin()
         self.log = io.StringIO()
         self.api = srv.make_server("127.0.0.1", 0, darwin_url=self.darwin.url, api_key="test-key",
+                                   service_url=self.darwin.service_url, service_key="service-key",
                                    stations={"KGX", "CLJ", "BHM"}, attribution="Data: National Rail",
                                    log=self.log)
         threading.Thread(target=self.api.serve_forever, daemon=True).start()
@@ -199,6 +208,72 @@ class ServerTest(unittest.TestCase):
         self.get("/health")
         self.get("/nope")
         self.assertEqual(self.log.getvalue(), "")
+
+    def test_service_stops(self):
+        status, headers, body = self.get("/service/10741504KNGX____")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["cache-control"], "max-age=30")
+        self.assertEqual(self.darwin.keys, ["service-key"])
+        self.assertTrue(self.darwin.paths[0].endswith("/GetServiceDetails/10741504KNGX____"))
+        svc = json.loads(body)
+        self.assertEqual(svc["attribution"], "Data: National Rail")
+        stops = svc["portions"][0]
+        self.assertEqual(len(stops), 17)
+        self.assertEqual(stops[0], {"name": "Finsbury Park", "crs": "FPK", "st": "14:41", "et": "On time",
+                                    "cancelled": False})
+        self.assertEqual(stops[-1]["name"], "Cambridge")
+
+    def test_bad_service_id_400_without_upstream_call(self):
+        for sid in ["x", "a/b", "../etc", "%2F", "A" * 41]:
+            status, _, body = self.get(f"/service/{sid}")
+            self.assertEqual(status, 400, sid)
+            self.assertEqual(json.loads(body), {"error": "bad service id"})
+        self.assertEqual(self.darwin.requests, 0)
+
+    def test_unknown_service_404(self):
+        self.darwin.mode = "badid"
+        status, _, body = self.get("/service/10741504KNGX____")
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body), {"error": "unknown service"})
+
+    def test_service_upstream_errors(self):
+        self.darwin.mode = "429"
+        self.assertEqual(self.get("/service/10741504KNGX____")[0], 429)
+        self.darwin.mode = "error"
+        self.assertEqual(self.get("/service/10741504KNGX____")[0], 502)
+        self.assertIn("upstream service 500", self.log.getvalue())
+
+    def test_stops_cannot_starve_the_boards(self):
+        self.darwin.mode = "slow"
+        results, boards = [], []
+
+        def stops():
+            results.append(self.get("/service/10741504KNGX____")[0])
+
+        threads = [threading.Thread(target=stops) for _ in range(8)]
+        for t in threads:
+            t.start()
+        time.sleep(0.3)  # the stop lookups now hold every slot they may have
+        boards.append(self.get("/departures/KGX")[0])
+        for t in threads:
+            t.join()
+        self.assertEqual(boards, [200])
+        self.assertIn(502, results)
+
+    def test_service_without_key_503(self):
+        api = srv.make_server("127.0.0.1", 0, darwin_url=self.darwin.url, api_key="k", stations={"KGX"},
+                              attribution="x", log=self.log)
+        threading.Thread(target=api.serve_forever, daemon=True).start()
+        try:
+            c = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=10)
+            c.request("GET", "/service/10741504KNGX____")
+            r = c.getresponse()
+            self.assertEqual(r.status, 503)
+            self.assertEqual(json.loads(r.read()), {"error": "unavailable"})
+        finally:
+            api.shutdown()
+            api.server_close()
+        self.assertEqual(self.darwin.requests, 0)
 
     def test_health_200(self):
         status, _, body = self.get("/health")

@@ -49,6 +49,15 @@ void main() {
     expect(d.destination, 'Euston');
   });
 
+  test('serviceId is read when present', () {
+    final b = Board.fromJson({'crs': 'KGX', 'generatedAt': '2026-11-16T23:58:00Z', 'nrccMessages': [],
+        'attribution': 'x', 'services': [
+          {'std': '14:36', 'destination': 'Cambridge', 'cancelled': false, 'serviceId': '10741504KNGX____'},
+          {'std': '14:40', 'destination': 'Harrogate', 'cancelled': false},
+        ]});
+    expect(b.services.map((d) => d.serviceId), ['10741504KNGX____', null]);
+  });
+
   test('empty board', () {
     final b = Board.fromJson({'crs': 'BKM', 'name': 'Berkhamsted', 'generatedAt': '2026-11-16T23:58:00Z',
         'nrccMessages': [], 'attribution': 'Data: National Rail', 'services': []});
@@ -93,6 +102,38 @@ void main() {
       final slow = DeparturesClient(MockClient((_) => Future.delayed(const Duration(seconds: 1), () => okJson(boardBody))),
           timeout: const Duration(milliseconds: 50));
       await expectLater(slow.fetch('KGX'), throwsA(isA<DeparturesUnavailable>()));
+    });
+  });
+
+  group('fetchStops', () {
+    const body = '{"generatedAt":"2026-11-17T14:25:19Z","attribution":"Data: National Rail","portions":[['
+        '{"name":"Finsbury Park","crs":"FPK","st":"14:41","et":"On time","cancelled":false},'
+        '{"name":"Hitchin","crs":"HIT","st":"15:25","et":"15:31","cancelled":false},'
+        '{"name":"Royston","crs":"RYS","st":"15:42","et":"Cancelled","cancelled":true}],'
+        '[{"name":"Arlesey","crs":"ARL","st":"15:30","et":null,"cancelled":false}]]}';
+
+    test('200 → stops, URL escapes the id', () async {
+      final requests = <http.Request>[];
+      final c = DeparturesClient(MockClient((req) async {
+        requests.add(req);
+        return okJson(body);
+      }));
+      final s = await c.fetchStops('10741504KNGX____');
+      expect(requests.single.url.toString(), '$apiBaseUrl/service/10741504KNGX____');
+      expect(s.length, 2);
+      expect(s[1].single.name, 'Arlesey');
+      expect(s[0].map((x) => (x.name, x.st, x.et, x.cancelled)).toList(), [
+        ('Finsbury Park', '14:41', 'On time', false),
+        ('Hitchin', '15:25', '15:31', false),
+        ('Royston', '15:42', 'Cancelled', true),
+      ]);
+    });
+
+    test('any failure → DeparturesUnavailable', () async {
+      for (final r in [http.Response('', 404), http.Response('', 503), okJson('{"portions":[[{"name":1}]]}'), okJson('[]')]) {
+        await expectLater(DeparturesClient(MockClient((_) async => r)).fetchStops('10741504KNGX____'),
+            throwsA(isA<DeparturesUnavailable>()));
+      }
     });
   });
 }

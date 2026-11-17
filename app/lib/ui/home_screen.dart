@@ -6,19 +6,26 @@ import '../config.dart';
 import '../data/departures.dart';
 import '../follow/follow_logic.dart';
 import '../follow/follower.dart';
+import '../domain/departure_text.dart';
 import 'departure_row.dart';
 import 'format.dart';
 import 'station_picker.dart';
+
+/// Loads the stops still ahead of a train, by Darwin service id.
+typedef StopsFetcher = Future<List<List<Stop>>> Function(String serviceId);
 
 /// Beyond this, the nearest station is probably not useful; say so.
 const farFromStationMeters = 25000;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.controller, this.openUrl = _launchExternal, this.follower});
+  const HomeScreen({super.key, required this.controller, this.openUrl = _launchExternal, this.follower, this.fetchStops});
   final AppController controller;
 
   /// Null where trains cannot be followed (iOS for now): rows are then not tappable.
   final Follower? follower;
+
+  /// Null: tapping a train shows no stops (tests that do not care).
+  final StopsFetcher? fetchStops;
 
   /// Opens a web page; injectable for tests.
   final Future<void> Function(Uri) openUrl;
@@ -148,7 +155,44 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _row(BuildContext context, Board b, Departure d) => _rowFor(context, widget.follower, b, d);
+  /// The open train (one at a time) and its stops, loaded when it was opened.
+  String? _openKey;
+  Future<List<List<Stop>>>? _openStops;
+
+  static String _key(Departure d) => d.serviceId ?? '${d.std}|${d.destination}';
+
+  void _toggleOpen(Departure d) => setState(() {
+        if (_openKey == _key(d)) {
+          _openKey = null;
+          _openStops = null;
+          return;
+        }
+        _openKey = _key(d);
+        final id = d.serviceId, fetch = widget.fetchStops;
+        // ignore(): a failure that lands before the panel listens must still reach it, not the zone
+        _openStops = id == null || fetch == null ? null : (fetch(id)..ignore());
+      });
+
+  Widget _row(BuildContext context, Board b, Departure d) {
+    final follower = widget.follower;
+    final current = follower?.current;
+    final followed = current != null && current.crs == b.crs && current.matches(d);
+    final t = FollowedTrain(crs: b.crs, std: d.std, destination: d.destination, serviceId: d.serviceId);
+    void toggleFollow() => _toggleFollow(context, follower!, t, followed);
+    final open = _openKey == _key(d);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      DepartureRow(d,
+          followed: followed,
+          onTap: () => _toggleOpen(d),
+          onLongPress: follower == null ? null : toggleFollow),
+      if (open)
+        _StopsPanel(
+          stops: _openStops,
+          followed: followed,
+          onFollow: follower == null ? null : toggleFollow,
+        ),
+    ]);
+  }
 
   List<Widget> _board(BuildContext context, Board b) {
     final c = controller;
@@ -174,13 +218,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-Widget _rowFor(BuildContext context, Follower? follower, Board b, Departure d) {
-  if (follower == null) return DepartureRow(d);
-  final t = FollowedTrain(crs: b.crs, std: d.std, destination: d.destination);
-  final followed = follower.current == t;
-  return DepartureRow(d, followed: followed, onTap: () => _toggleFollow(context, follower, t, followed));
-}
-
 Future<void> _toggleFollow(BuildContext context, Follower follower, FollowedTrain t, bool followed) async {
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
@@ -201,6 +238,104 @@ Future<void> _toggleFollow(BuildContext context, Follower follower, FollowedTrai
       onPressed: () => previous == null ? follower.stop() : follower.follow(previous),
     ),
   ));
+}
+
+/// Under an open train: follow button (where following works) and the stops still ahead.
+class _StopsPanel extends StatelessWidget {
+  const _StopsPanel({required this.stops, required this.followed, required this.onFollow});
+  final Future<List<List<Stop>>>? stops;
+  final bool followed;
+  final VoidCallback? onFollow;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (onFollow != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: followed
+                ? OutlinedButton.icon(
+                    onPressed: onFollow, icon: const Icon(Icons.notifications_off), label: const Text('Stop following'))
+                : FilledButton.tonalIcon(
+                    onPressed: onFollow,
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('Follow this train')),
+          ),
+        if (stops == null)
+          Text('Stops unavailable', style: muted)
+        else
+          FutureBuilder<List<List<Stop>>>(
+            future: stops,
+            builder: (context, snap) {
+              if (snap.hasError) return Text('Stops unavailable', style: muted);
+              if (!snap.hasData) {
+                return const Padding(
+                    padding: EdgeInsets.all(8), child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+              }
+              final portions = snap.data!;
+              if (portions.isEmpty) return Text('No more stops', style: muted);
+              final split = portions.length > 1;
+              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (final p in portions) ...[
+                  if (split)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, bottom: 2),
+                      child: Text('To ${p.last.name}',
+                          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+                    ),
+                  for (final s in p) _StopLine(s),
+                ],
+              ]);
+            },
+          ),
+      ]),
+    );
+  }
+}
+
+class _StopLine extends StatelessWidget {
+  const _StopLine(this.s);
+  final Stop s;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final et = s.et;
+    final status = s.cancelled
+        ? 'Cancelled'
+        : et != null && hhmm.hasMatch(et)
+            ? 'Exp $et'
+            : et == 'Delayed'
+                ? 'Delayed'
+                : '';
+    final body = theme.textTheme.bodyMedium;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        SizedBox(
+          width: 56,
+          child: Text(s.st,
+              style: body?.copyWith(
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: scheme.onSurfaceVariant,
+              )),
+        ),
+        Expanded(
+          child: Text(s.name,
+              style: body?.copyWith(decoration: s.cancelled ? TextDecoration.lineThrough : null),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ),
+        if (status.isNotEmpty)
+          Text(status, style: theme.textTheme.bodySmall?.copyWith(color: scheme.error, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
 }
 
 class _FilterChips extends StatelessWidget {

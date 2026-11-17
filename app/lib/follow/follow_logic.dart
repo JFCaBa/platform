@@ -1,30 +1,45 @@
 import '../data/departures.dart';
 import '../domain/departure_text.dart';
 
-/// The one train being followed: its station and the board's scheduled time and destination.
+/// The one train being followed: its station, the board's scheduled time and destination and,
+/// when the API gives it, Darwin's id for the train.
 class FollowedTrain {
-  const FollowedTrain({required this.crs, required this.std, required this.destination});
+  const FollowedTrain({required this.crs, required this.std, required this.destination, this.serviceId});
 
   final String crs;
   final String std;
   final String destination;
+  final String? serviceId;
 
-  factory FollowedTrain.fromJson(Map<String, dynamic> j) =>
-      FollowedTrain(crs: j['crs'] as String, std: j['std'] as String, destination: j['destination'] as String);
+  factory FollowedTrain.fromJson(Map<String, dynamic> j) => FollowedTrain(
+      crs: j['crs'] as String,
+      std: j['std'] as String,
+      destination: j['destination'] as String,
+      serviceId: j['serviceId'] as String?);
 
-  Map<String, dynamic> toJson() => {'crs': crs, 'std': std, 'destination': destination};
+  Map<String, dynamic> toJson() =>
+      {'crs': crs, 'std': std, 'destination': destination, if (serviceId != null) 'serviceId': serviceId};
 
-  /// Same train on its station's board, whatever its platform or expected time.
-  bool matches(Departure d) => d.std == std && d.destination == destination;
+  /// Same train on its station's board, whatever its platform or expected time: by id when both
+  /// sides have one, else by scheduled time and destination.
+  bool matches(Departure d) {
+    final id = serviceId, other = d.serviceId;
+    if (id != null && other != null) return id == other;
+    return d.std == std && d.destination == destination;
+  }
 
   String get title => '$std to $destination';
 
   @override
   bool operator ==(Object other) =>
-      other is FollowedTrain && other.crs == crs && other.std == std && other.destination == destination;
+      other is FollowedTrain &&
+      other.crs == crs &&
+      other.std == std &&
+      other.destination == destination &&
+      other.serviceId == serviceId;
 
   @override
-  int get hashCode => Object.hash(crs, std, destination);
+  int get hashCode => Object.hash(crs, std, destination, serviceId);
 }
 
 Departure? findFollowed(Board b, FollowedTrain t) {

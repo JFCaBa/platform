@@ -16,6 +16,7 @@ class Departure {
     required this.cancelled,
     this.delayReason,
     this.cancelReason,
+    this.serviceId,
   });
 
   final String std;
@@ -28,6 +29,9 @@ class Departure {
   final String? delayReason;
   final String? cancelReason;
 
+  /// Darwin's id for this train today; asks for its stops. Null from an older API.
+  final String? serviceId;
+
   factory Departure.fromJson(Map<String, dynamic> j) => Departure(
         std: j['std'] as String,
         etd: j['etd'] as String?,
@@ -38,6 +42,28 @@ class Departure {
         cancelled: j['cancelled'] as bool? ?? false,
         delayReason: j['delayReason'] as String?,
         cancelReason: j['cancelReason'] as String?,
+        serviceId: j['serviceId'] as String?,
+      );
+}
+
+/// A stop still ahead of a train.
+class Stop {
+  const Stop({required this.name, required this.st, this.et, required this.cancelled});
+
+  final String name;
+
+  /// Scheduled time, "15:25".
+  final String st;
+
+  /// "On time" | "15:31" | "Delayed" | "Cancelled" | null.
+  final String? et;
+  final bool cancelled;
+
+  factory Stop.fromJson(Map<String, dynamic> j) => Stop(
+        name: j['name'] as String,
+        st: j['st'] as String,
+        et: j['et'] as String?,
+        cancelled: j['cancelled'] as bool? ?? false,
       );
 }
 
@@ -108,6 +134,28 @@ class DeparturesClient {
     if (resp.statusCode != 200) throw DeparturesUnavailable('HTTP ${resp.statusCode}');
     try {
       return Board.fromJson(jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>);
+    } catch (e) {
+      throw DeparturesUnavailable(e);
+    }
+  }
+
+  /// The stops still ahead of a train, one list per portion (a train that splits has several:
+  /// the main one first). Optional data: every failure is [DeparturesUnavailable].
+  Future<List<List<Stop>>> fetchStops(String serviceId) async {
+    final http.Response resp;
+    try {
+      resp = await _client
+          .get(Uri.parse('$baseUrl/service/${Uri.encodeComponent(serviceId)}'), headers: {'User-Agent': userAgent})
+          .timeout(timeout);
+    } catch (e) {
+      throw DeparturesUnavailable(e);
+    }
+    if (resp.statusCode != 200) throw DeparturesUnavailable('HTTP ${resp.statusCode}');
+    try {
+      final j = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      return [
+        for (final p in j['portions'] as List) [for (final s in p as List) Stop.fromJson(s as Map<String, dynamic>)],
+      ];
     } catch (e) {
       throw DeparturesUnavailable(e);
     }

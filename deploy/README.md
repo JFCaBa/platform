@@ -1,6 +1,6 @@
 # Deploy (VPS `ssh myairports`)
 
-Layout: `/opt/platform/repo` (clone), `/opt/platform/.env` (root, 600: `DARWIN_API_KEY=...`, written by hand, never in git;
+Layout: `/opt/platform/repo` (clone), `/opt/platform/.env` (root, 600: `DARWIN_API_KEY=...` for the board and `DARWIN_SERVICE_KEY=...` for Service Details (train stops; without it `/service/` answers 503), written by hand, never in git;
 `api/compose.yaml` reads it through `env_file`).
 
 Relies on what this server already has for its other sites: `snippets/block-bad-bots.conf`, `snippets/honeypot.conf`,

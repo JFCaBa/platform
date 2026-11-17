@@ -83,6 +83,7 @@ def _service(raw: dict) -> dict:
         "cancelled": bool(raw.get("isCancelled")),
         "delayReason": raw.get("delayReason"),
         "cancelReason": raw.get("cancelReason"),
+        "serviceId": raw.get("serviceID"),
     }
 
 
@@ -100,4 +101,31 @@ def to_board(darwin: dict, crs: str, attribution: str, now: datetime) -> dict:
         "nrccMessages": [m for m in messages if m],
         "attribution": attribution,
         "services": [_service(s) for s in darwin.get("trainServices") or []],
+    }
+
+
+def _stop(raw: dict) -> dict:
+    cancelled = bool(raw.get("isCancelled")) or raw.get("et") == "Cancelled"
+    et = raw.get("et")
+    return {
+        "name": raw.get("locationName"),
+        "crs": raw.get("crs"),
+        "st": raw.get("st"),
+        "et": "Cancelled" if cancelled else (et if et in ETD_WORDS or (isinstance(et, str) and HHMM.match(et)) else None),
+        "cancelled": cancelled,
+    }
+
+
+def to_stops(darwin: dict, attribution: str, now: datetime) -> dict:
+    """Service Details → the stops still ahead, one list per portion: a train that splits lists
+    the main portion first and each portion that leaves it after, from the split onwards."""
+    portions = []
+    for portion in darwin.get("subsequentCallingPoints") or []:
+        stops = [_stop(p) for p in (portion or {}).get("callingPoint") or []]
+        if stops:
+            portions.append(stops)
+    return {
+        "generatedAt": _utc_iso(darwin.get("generatedAt"), now),
+        "attribution": attribution,
+        "portions": portions,
     }

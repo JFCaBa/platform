@@ -34,7 +34,7 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
-  Future<AppController> pumpHome(WidgetTester tester, {Follower? follower}) async {
+  Future<AppController> pumpHome(WidgetTester tester, {Follower? follower, StopsFetcher? fetchStops}) async {
     late AppController c;
     await tester.runAsync(() async {
       c = AppController(server.client, dir, DeparturesClient(server.client), location,
@@ -42,7 +42,7 @@ void main() {
       await c.start();
       await Future<void>.delayed(const Duration(milliseconds: 30));
     });
-    await tester.pumpWidget(MaterialApp(home: HomeScreen(controller: c, openUrl: (u) async => opened.add(u), follower: follower)));
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(controller: c, openUrl: (u) async => opened.add(u), follower: follower, fetchStops: fetchStops)));
     await tester.pump();
     return c;
   }
@@ -212,31 +212,126 @@ void main() {
     await tester.pumpWidget(PlatformApp(controller: c));
     expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'What Platform');
   });
-  group('follow a train', () {
-    const cambridge = FollowedTrain(crs: 'KGX', std: '09:30', destination: 'Cambridge');
+  group('stops and following', () {
+    const cambridge = FollowedTrain(crs: 'KGX', std: '09:30', destination: 'Cambridge', serviceId: 'S30');
     final bell = find.byIcon(Icons.notifications_active);
-    setUp(() => server.boards['KGX'] = boardJson('KGX', clockNow, services: [
-          service('09:20', destination: 'Leeds'),
-          service('09:30', destination: 'Cambridge', platform: '10'),
-        ]));
+    late List<String> asked;
+    late Object stopsResult; // portions (List<List<Stop>>) or an exception
+    setUp(() {
+      asked = [];
+      stopsResult = const [
+        [
+          Stop(name: 'Finsbury Park', st: '09:35', et: 'On time', cancelled: false),
+          Stop(name: 'Hitchin', st: '10:05', et: '10:09', cancelled: false),
+          Stop(name: 'Royston', st: '10:20', et: 'Cancelled', cancelled: true),
+        ],
+      ];
+      server.boards['KGX'] = boardJson('KGX', clockNow, services: [
+        service('09:20', destination: 'Leeds', serviceId: 'S20'),
+        service('09:30', destination: 'Cambridge', platform: '10', serviceId: 'S30'),
+        service('09:40', destination: 'York'),
+      ]);
+    });
+    Future<List<List<Stop>>> stops(String id) async {
+      asked.add(id);
+      final r = stopsResult;
+      if (r is List<List<Stop>>) return r;
+      throw r;
+    }
 
-    testWidgets('tapping a row follows it', (tester) async {
+    Future<AppController> pump(WidgetTester tester, {Follower? follower}) =>
+        pumpHome(tester, follower: follower, fetchStops: stops);
+
+    Future<void> openRow(WidgetTester tester, String std) async {
+      await tester.tap(find.text(std));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('tapping a row shows its stops, tapping again hides them', (tester) async {
+      await pump(tester);
+      await openRow(tester, '09:30');
+      expect(asked, ['S30']);
+      expect(find.text('Finsbury Park'), findsOneWidget);
+      expect(find.text('09:35'), findsOneWidget);
+      expect(find.text('Exp 10:09'), findsOneWidget);
+      expect(find.text('Royston'), findsOneWidget);
+      expect(find.text('Cancelled'), findsOneWidget);
+      await openRow(tester, '09:30');
+      expect(find.text('Finsbury Park'), findsNothing);
+    });
+
+    testWidgets('a train that splits shows each portion under its destination', (tester) async {
+      stopsResult = const [
+        [
+          Stop(name: 'Horsham', st: '10:00', cancelled: false),
+          Stop(name: 'Portsmouth Harbour', st: '11:00', cancelled: false),
+        ],
+        [Stop(name: 'Bognor Regis', st: '10:50', cancelled: false)],
+      ];
+      await pump(tester);
+      await openRow(tester, '09:30');
+      expect(find.text('To Portsmouth Harbour'), findsOneWidget);
+      expect(find.text('To Bognor Regis'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('To Bognor Regis')).dy,
+          greaterThan(tester.getTopLeft(find.text('Portsmouth Harbour')).dy));
+    });
+
+    testWidgets('a single portion has no heading', (tester) async {
+      await pump(tester);
+      await openRow(tester, '09:30');
+      expect(find.textContaining('To '), findsNothing);
+    });
+
+    testWidgets('one train open at a time', (tester) async {
+      await pump(tester);
+      await openRow(tester, '09:30');
+      await openRow(tester, '09:20');
+      expect(asked, ['S30', 'S20']);
+      expect(find.text('Finsbury Park'), findsOneWidget); // same fake stops, shown once: only one panel
+    });
+
+    testWidgets('stops unavailable on error or without an id', (tester) async {
+      stopsResult = const DeparturesUnavailable('x');
+      await pump(tester);
+      await openRow(tester, '09:30');
+      expect(find.text('Stops unavailable'), findsOneWidget);
+      await openRow(tester, '09:40');
+      expect(find.text('Stops unavailable'), findsOneWidget);
+      expect(asked, ['S30']);
+    });
+
+    testWidgets('follow and stop from the open row', (tester) async {
       final f = FakeFollower();
-      await pumpHome(tester, follower: f);
-      expect(bell, findsNothing);
-      await tester.tap(find.text('09:30'));
+      await pump(tester, follower: f);
+      await openRow(tester, '09:30');
+      await tester.tap(find.text('Follow this train'));
       await tester.pump();
       expect(f.current, cambridge);
       expect(find.text('Following 09:30 to Cambridge'), findsOneWidget);
       expect(bell, findsOneWidget);
-      final bellY = tester.getCenter(bell).dy;
-      expect((bellY - tester.getCenter(find.text('Plat 10')).dy).abs(), lessThan(30)); // on the Cambridge row
+      await tester.tap(find.text('Stop following'));
+      await tester.pump();
+      expect(f.current, isNull);
+      expect(find.text('Stopped following'), findsOneWidget);
+    });
+
+    testWidgets('long press follows and unfollows', (tester) async {
+      final f = FakeFollower();
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(f.current, cambridge);
+      expect(bell, findsOneWidget);
+      expect((tester.getCenter(bell).dy - tester.getCenter(find.text('Plat 10')).dy).abs(), lessThan(30));
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(f.current, isNull);
     });
 
     testWidgets('Undo stops following', (tester) async {
       final f = FakeFollower();
-      await pumpHome(tester, follower: f);
-      await tester.tap(find.text('09:30'));
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
       await tester.pump();
       await tester.pump(const Duration(seconds: 1)); // snackbar slid in
       await tester.tap(find.text('Undo'));
@@ -245,20 +340,10 @@ void main() {
       expect(bell, findsNothing);
     });
 
-    testWidgets('tapping the followed row stops', (tester) async {
-      final f = FakeFollower()..current = cambridge;
-      await pumpHome(tester, follower: f);
-      expect(bell, findsOneWidget);
-      await tester.tap(find.text('09:30'));
-      await tester.pump();
-      expect(f.current, isNull);
-      expect(find.text('Stopped following'), findsOneWidget);
-    });
-
     testWidgets('permission denied', (tester) async {
       final f = FakeFollower(granted: false);
-      await pumpHome(tester, follower: f);
-      await tester.tap(find.text('09:30'));
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
       await tester.pump();
       expect(f.current, isNull);
       expect(find.text('Allow notifications to follow a train'), findsOneWidget);
@@ -267,13 +352,18 @@ void main() {
 
     testWidgets('bell only on the followed station', (tester) async {
       final f = FakeFollower()..current = const FollowedTrain(crs: 'CBG', std: '09:30', destination: 'Cambridge');
-      await pumpHome(tester, follower: f);
+      await pump(tester, follower: f);
       expect(bell, findsNothing);
     });
 
-    testWidgets('no follower, rows are not tappable', (tester) async {
-      await pumpHome(tester);
-      expect(find.ancestor(of: find.text('09:30'), matching: find.byType(InkWell)), findsNothing);
+    testWidgets('no follower: stops, but no follow button and long press does nothing', (tester) async {
+      await pump(tester);
+      await openRow(tester, '09:30');
+      expect(find.text('Finsbury Park'), findsOneWidget);
+      expect(find.text('Follow this train'), findsNothing);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(find.byType(SnackBar), findsNothing);
     });
   });
 }

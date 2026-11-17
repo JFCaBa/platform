@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from platform_api.board import strip_html, to_board  # noqa: E402
+from platform_api.board import strip_html, to_board, to_stops  # noqa: E402
 
 FIX = Path(__file__).parent / "fixtures"
 NOW = datetime(2026, 11, 16, 14, 34, tzinfo=timezone.utc)
 ATTR = "Data: National Rail"
-KEYS = {"std", "etd", "platform", "destination", "via", "operator", "cancelled", "delayReason", "cancelReason"}
+KEYS = {"std", "etd", "platform", "destination", "via", "operator", "cancelled", "delayReason", "cancelReason", "serviceId"}
 
 
 def load(name):
@@ -116,6 +116,33 @@ class BoardTest(unittest.TestCase):
         s = svc(isCancelled=True, etd="Cancelled", cancelReason="Points failure", delayReason="Late crew")
         out = to_board(board_with(s), "KGX", ATTR, NOW)["services"][0]
         self.assertEqual((out["cancelReason"], out["delayReason"]), ("Points failure", "Late crew"))
+
+    def test_service_id_mapped(self):
+        board = to_board(load("darwin_kgx.json"), "KGX", "x", NOW)
+        self.assertEqual(board["services"][0]["serviceId"], "10749482KNGX____")
+
+    def test_stops_from_service_details(self):
+        svc = to_stops(load("darwin_service.json"), "x", NOW)
+        self.assertEqual(svc["generatedAt"], "2026-11-17T14:25:19Z")
+        self.assertEqual(len(svc["portions"]), 1)
+        self.assertEqual([s["name"] for s in svc["portions"][0]][:2], ["Finsbury Park", "Alexandra Palace"])
+
+    def test_stops_status_values(self):
+        raw = {"generatedAt": "2026-11-17T14:25:19+00:00", "subsequentCallingPoints": [{"callingPoint": [
+            {"locationName": "A", "crs": "AAA", "st": "10:00", "et": "10:04"},
+            {"locationName": "B", "crs": "BBB", "st": "10:10", "et": "Cancelled", "isCancelled": True},
+            {"locationName": "C", "crs": "CCC", "st": "10:20", "et": "Delayed"},
+            {"locationName": "D", "crs": "DDD", "st": "10:30", "et": "nonsense"},
+        ]}, {"callingPoint": [{"locationName": "Other portion", "crs": "OOO", "st": "11:00"}]}]}
+        portions = to_stops(raw, "x", NOW)["portions"]
+        self.assertEqual([(s["name"], s["et"], s["cancelled"]) for s in portions[0]],
+                         [("A", "10:04", False), ("B", "Cancelled", True), ("C", "Delayed", False), ("D", None, False)])
+        # a train that splits: the other portion's stops are kept, in their own list
+        self.assertEqual([s["name"] for s in portions[1]], ["Other portion"])
+
+    def test_stops_none_when_no_calling_points(self):
+        self.assertEqual(to_stops({"generatedAt": None}, "x", NOW)["portions"], [])
+        self.assertEqual(to_stops({"subsequentCallingPoints": [None, {"callingPoint": []}]}, "x", NOW)["portions"], [])
 
     def test_input_not_mutated(self):
         raw = load("darwin_clj.json")

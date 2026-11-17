@@ -20,22 +20,24 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   tzdata.initializeTimeZones();
   final client = http.Client();
+  final departures = DeparturesClient(client);
   final controller = AppController(
     client,
     await getApplicationSupportDirectory(),
-    DeparturesClient(client),
+    departures,
     GeolocatorLocationSource(),
     await SharedPreferences.getInstance(),
   );
   // Following a train needs a background service: Android only for now.
   final follower = !kIsWeb && Platform.isAndroid ? await FollowService.create() : null;
-  runApp(PlatformApp(controller: controller, follower: follower));
+  runApp(PlatformApp(controller: controller, follower: follower, fetchStops: departures.fetchStops));
 }
 
 class PlatformApp extends StatefulWidget {
-  const PlatformApp({super.key, required this.controller, this.follower});
+  const PlatformApp({super.key, required this.controller, this.follower, this.fetchStops});
   final AppController controller;
   final Follower? follower;
+  final StopsFetcher? fetchStops;
 
   @override
   State<PlatformApp> createState() => _PlatformAppState();
@@ -74,7 +76,7 @@ class _PlatformAppState extends State<PlatformApp> with WidgetsBindingObserver {
       themeMode: ThemeMode.system,
       theme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.light),
       darkTheme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.dark),
-      home: HomeScreen(controller: widget.controller, follower: widget.follower),
+      home: HomeScreen(controller: widget.controller, follower: widget.follower, fetchStops: widget.fetchStops),
     );
   }
 }

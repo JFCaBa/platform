@@ -21,7 +21,8 @@ Map<String, dynamic> service(String std,
         String? via,
         bool cancelled = false,
         String? delayReason,
-        String? cancelReason}) =>
+        String? cancelReason,
+        String? serviceId}) =>
     {
       'std': std,
       'etd': etd,
@@ -32,6 +33,7 @@ Map<String, dynamic> service(String std,
       'cancelled': cancelled,
       'delayReason': delayReason,
       'cancelReason': cancelReason,
+      'serviceId': ?serviceId,
     };
 
 String boardJson(String crs, DateTime generatedAt,
