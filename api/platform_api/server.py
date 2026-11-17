@@ -126,6 +126,18 @@ def load_stations(url: str, fallback: Path) -> set[str]:
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 128  # default 5 resets bursts of connections
+    log: TextIO = sys.stderr
+
+    def handle_error(self, request, client_address):
+        """The base class prints the client address and a traceback; log the class name only,
+        and nothing for a client that went away."""
+        e = sys.exc_info()[1]
+        if isinstance(e, OSError):
+            return
+        try:
+            self.log.write(f"unhandled {type(e).__name__}\n")
+        except Exception:
+            pass
 
 
 def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, dict, int] | None:
@@ -162,7 +174,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
     def fetch_board(crs: str, wait: float | None = None) -> dict:
         """One board reading for /follow and the poller. Blocks for a poll slot (up to `wait`
         seconds when given, else Busy). Raises Upstream or a shape error; never logs."""
-        if not poll_slots.acquire(timeout=-1 if wait is None else wait):
+        if not (poll_slots.acquire() if wait is None else poll_slots.acquire(timeout=wait)):
             raise Busy()
         try:
             raw = fetch_darwin(f"{darwin_url}/{crs}{QUERY}", api_key, deadline_s)
@@ -250,17 +262,21 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             self.send_json(200, board, cache="max-age=30")
 
         def read_json(self) -> tuple[bool, object]:
-            """(ok, value) for a JSON body of exactly Content-Length bytes, at most 4 KB."""
+            """(ok, value) for a JSON body of exactly Content-Length bytes, at most 4 KB. On any
+            rejection the connection is closed after the reply, so unread bytes are never parsed
+            as another request."""
+            ok, value = False, None
             try:
                 n = int(self.headers.get("Content-Length", ""))
-            except ValueError:
-                return False, None
-            if not 0 <= n <= MAX_FOLLOW_BODY:
-                return False, None  # not read: HTTP/1.0, the connection closes after the reply
-            try:
-                return True, json.loads(self.rfile.read(n))
-            except (ValueError, RecursionError):
-                return False, None
+                if 0 <= n <= MAX_FOLLOW_BODY:  # a bigger body is not read
+                    data = self.rfile.read(n)
+                    if len(data) == n:
+                        ok, value = True, json.loads(data)
+            except (ValueError, RecursionError, OSError):
+                ok, value = False, None
+            if not ok:
+                self.close_connection = True
+            return ok, value
 
         def follow_unavailable(self) -> bool:
             if follows is None or push is None:
@@ -281,8 +297,9 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             now = clock()
             if now - started_ms / 1000 >= MAX_DURATION:
                 return self.send_json(410, {"error": "gone"})
-            if follows.is_same(token, train):  # app re-sync: keep baseline and original start
+            if follows.is_same(token, train, env):  # app re-sync: keep baseline and original start
                 return self.send_json(200, {"ok": True})
+            epoch = follows.epoch(token)  # a DELETE (or another POST) while we read Darwin wins
             try:
                 board = fetch_board(train["crs"], wait=follow_wait_s)
             except Busy:
@@ -297,7 +314,10 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             if found is None:
                 return self.send_json(410, {"error": "gone"})
             started = min(max(started_ms / 1000, now - MAX_DURATION), now)
-            if follows.upsert(token, env, train, found, started) != "ok":
+            result = follows.upsert(token, env, train, found, started, expect_epoch=epoch)
+            if result == "stale":
+                return self.send_json(409, {"error": "conflict"})
+            if result != "ok":
                 return self.send_json(503, {"error": "busy"})
             self.send_json(200, {"ok": True})
 
@@ -316,6 +336,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             self.end_headers()
 
     httpd = _Server((host, port), Handler)
+    httpd.log = log
     httpd.stations = stations
     httpd.slots = slots
     httpd.poll_slots = poll_slots

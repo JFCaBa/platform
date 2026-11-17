@@ -1,6 +1,9 @@
+import contextlib
 import http.client
 import io
 import json
+import socket
+import struct
 import sys
 import threading
 import time
@@ -524,6 +527,70 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(len(self.store), 0)
         self.assertEqual(self.log.getvalue(), "")
 
+    def test_delete_during_inflight_post_wins_409(self):
+        self.darwin.mode = "slow"  # 1.5 s board reading
+        result = []
+        t = threading.Thread(target=lambda: result.append(self.request("POST", self.body())))
+        t.start()
+        deadline = time.monotonic() + 5
+        while self.darwin.requests == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.darwin.requests, 1)  # POST is now waiting on Darwin
+        self.assertEqual(self.request("DELETE", {"token": TOKEN})[0], 204)
+        t.join()
+        self.assertEqual(result, [(409, {"error": "conflict"})])
+        self.assertEqual(len(self.store), 0)
+
+    def test_refollow_same_train_other_env_refreshes_env(self):
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        (before,) = self.store.for_station("KGX")
+        self.now += 60
+        self.assertEqual(self.request("POST", self.body(env="production")), (200, {"ok": True}))
+        self.assertEqual(self.darwin.requests, 2)  # normal path: board read again
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.env, "production")
+        self.assertEqual((f.started, f.last, f.gen), (before.started, before.last, before.gen))
+
+    def raw(self, data: bytes, reset=False) -> bytes:
+        sock = socket.create_connection(("127.0.0.1", self.api.server_address[1]), timeout=10)
+        try:
+            sock.sendall(data)
+            if reset:  # RST instead of FIN
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                return b""
+            out = b""
+            while chunk := sock.recv(65536):
+                out += chunk
+            return out
+        finally:
+            sock.close()
+
+    def test_rejected_body_is_never_parsed_as_next_request(self):
+        inner = b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n"
+        for proto in [b"HTTP/1.0", b"HTTP/1.1"]:
+            with self.subTest(proto):
+                body = inner + b" " * 5000
+                out = self.raw(b"POST /follow " + proto + b"\r\nHost: x\r\nContent-Length: "
+                               + str(len(body)).encode() + b"\r\n\r\n" + body)
+                self.assertEqual(out.count(b"HTTP/1."), 1, out)
+                self.assertIn(b" 400 ", out.split(b"\r\n")[0])
+
+    def test_client_reset_mid_body_logs_no_address(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.raw(b"POST /follow HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n{\"tok", reset=True)
+            time.sleep(0.5)  # let the handler thread see the reset
+        self.assertNotIn("127.0.0.1", err.getvalue())
+        self.assertEqual(self.log.getvalue(), "")
+        self.assertEqual(self.request("POST", self.body())[0], 200)  # server still serving
+
+    def test_handle_error_logs_class_name_only(self):
+        try:
+            raise ValueError("secret " + TOKEN)
+        except ValueError:
+            self.api.handle_error(None, ("127.0.0.1", 1234))
+        self.assertEqual(self.log.getvalue(), "unhandled ValueError\n")
+
     def test_follow_logs_nothing(self):
         self.request("POST", self.body())
         self.request("POST", self.body())
@@ -569,7 +636,7 @@ class StationsTest(unittest.TestCase):
         from cryptography.hazmat.primitives.asymmetric import ec
         pem = ec.generate_private_key(ec.SECP256R1()).private_bytes(
             serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-        seen, runs = {}, []
+        seen, runs, ran = {}, [], threading.Event()
 
         class Dummy:
             server_address = ("0.0.0.0", 8510)
@@ -587,6 +654,7 @@ class StationsTest(unittest.TestCase):
 
             def run(self, stop, every=30.0):
                 runs.append(stop)
+                ran.set()
 
         def fake_make(host, port, **kw):
             seen.update(kw)
@@ -600,7 +668,7 @@ class StationsTest(unittest.TestCase):
             self.assertEqual(srv.main(env=env), 0)
         finally:
             srv.make_server, srv.load_stations, srv.Poller = orig
-        time.sleep(0.2)
+        self.assertTrue(ran.wait(5))
         self.assertIsNotNone(seen["push"])
         self.assertIsInstance(seen["follows"], FollowStore)
         store, _, push = runs[0]

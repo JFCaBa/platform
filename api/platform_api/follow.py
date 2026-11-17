@@ -88,7 +88,12 @@ class Follow:
 class FollowStore:
     """Follows kept in memory only, keyed by device token. Thread-safe. Every new or replaced
     follow gets a fresh generation so the poller can tell when it was changed under it.
-    A same-train upsert refreshes `env` without bumping `gen`."""
+    A same-train upsert refreshes `env` without bumping `gen`.
+
+    Each token also has an epoch, bumped by every upsert and remove of that token, so a POST
+    that read the board meanwhile can tell a DELETE (or another POST) happened and back off."""
+
+    MAX_EPOCHS = 10_000
 
     def __init__(self, max_follows: int = 500, max_stations: int = 50) -> None:
         self._max_follows = max_follows
@@ -96,15 +101,37 @@ class FollowStore:
         self._lock = threading.Lock()
         self._follows: dict[str, Follow] = {}
         self._gen = 0
+        self._epochs: dict[str, int] = {}  # insertion-ordered: oldest bump first
+        self._epoch_ctr = 0
 
-    def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float) -> str:
+    def epoch(self, token: str) -> int:
+        with self._lock:
+            return self._epochs.get(token, 0)
+
+    def _bump(self, token: str) -> None:
+        """Caller holds the lock. Values come from one store-wide counter, so they never repeat.
+        Dropping the oldest entry is safe: its epoch becomes 0, which differs from any value
+        read while it existed."""
+        self._epoch_ctr += 1
+        self._epochs.pop(token, None)
+        self._epochs[token] = self._epoch_ctr
+        while len(self._epochs) > self.MAX_EPOCHS:
+            del self._epochs[next(iter(self._epochs))]
+
+    def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float,
+               expect_epoch: int | None = None) -> str:
+        """"ok", "busy" (caps), or "stale" when `expect_epoch` is given and the token's epoch
+        has changed since (nothing is written then)."""
         crs = train.get("crs")
         if not isinstance(crs, str) or not crs:
             raise ValueError("train needs a non-empty crs")
         with self._lock:
+            if expect_epoch is not None and self._epochs.get(token, 0) != expect_epoch:
+                return "stale"
             cur = self._follows.get(token)
             if cur is not None and _same_train(cur.train, train):
                 cur.env = env
+                self._bump(token)
                 return "ok"
             if cur is None and len(self._follows) >= self._max_follows:
                 return "busy"
@@ -113,12 +140,15 @@ class FollowStore:
                 return "busy"
             self._gen += 1
             self._follows[token] = Follow(token, env, dict(train), started, dict(baseline), None, 0, self._gen)
+            self._bump(token)
             return "ok"
 
-    def is_same(self, token: str, train: dict) -> bool:
+    def is_same(self, token: str, train: dict, env: str | None = None) -> bool:
+        """Same train followed by this token (and same env, when given)."""
         with self._lock:
             cur = self._follows.get(token)
-            return cur is not None and _same_train(cur.train, train)
+            return (cur is not None and _same_train(cur.train, train)
+                    and (env is None or cur.env == env))
 
     def update(self, token: str, gen: int, **fields) -> bool:
         bad = set(fields) - _UPDATABLE
@@ -142,6 +172,9 @@ class FollowStore:
             cur = self._follows.get(token)
             if cur is not None and (gen is None or cur.gen == gen):
                 del self._follows[token]
+                self._bump(token)
+            elif gen is None:  # a DELETE wins over a POST in flight even if nothing is stored yet
+                self._bump(token)
 
     def stations(self) -> set[str]:
         with self._lock:

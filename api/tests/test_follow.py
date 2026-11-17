@@ -167,6 +167,49 @@ class FollowStoreTest(unittest.TestCase):
                 s.upsert("aa", "production", {**train(), **bad} if bad else {"std": "08:12"}, {}, 1.0)
         self.assertEqual(len(s), 0)
 
+    def test_epoch_unknown_token_is_zero(self):
+        self.assertEqual(FollowStore().epoch("aa"), 0)
+
+    def test_stale_upsert_after_remove(self):
+        s = FollowStore()
+        e = s.epoch("aa")
+        s.remove("aa")  # DELETE of a follow that did not exist yet still wins
+        self.assertNotEqual(s.epoch("aa"), e)
+        self.assertEqual(s.upsert("aa", "production", train(), {}, 1.0, expect_epoch=e), "stale")
+        self.assertEqual(len(s), 0)
+
+    def test_stale_upsert_after_other_upsert(self):
+        s = FollowStore()
+        e = s.epoch("aa")
+        self.assertEqual(s.upsert("aa", "production", train(), {"platform": "1"}, 1.0, expect_epoch=e), "ok")
+        self.assertEqual(s.upsert("aa", "production", train(std="09:00"), {}, 2.0, expect_epoch=e), "stale")
+        (f,) = s.for_station("CDF")
+        self.assertEqual(f.train, train())
+        e2 = s.epoch("aa")
+        self.assertNotEqual(e2, e)
+        self.assertEqual(s.upsert("aa", "production", train(std="09:00"), {}, 2.0, expect_epoch=e2), "ok")
+
+    def test_epoch_untouched_by_other_tokens(self):
+        s = FollowStore()
+        e = s.epoch("aa")
+        s.upsert("bb", "production", train(), {}, 1.0)
+        s.remove("bb")
+        self.assertEqual(s.upsert("aa", "production", train(), {}, 1.0, expect_epoch=e), "ok")
+
+    def test_epoch_map_is_bounded(self):
+        s = FollowStore()
+        for i in range(FollowStore.MAX_EPOCHS + 50):
+            s.remove(f"t{i}")
+        self.assertLessEqual(len(s._epochs), FollowStore.MAX_EPOCHS)
+        self.assertNotEqual(s.epoch(f"t{FollowStore.MAX_EPOCHS + 49}"), 0)
+
+    def test_is_same_checks_env_when_given(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {}, 1.0)
+        self.assertTrue(s.is_same("aa", train(), "production"))
+        self.assertFalse(s.is_same("aa", train(), "sandbox"))
+        self.assertTrue(s.is_same("aa", train()))
+
     def test_remove_without_gen(self):
         s = FollowStore()
         s.upsert("aa", "production", train(), {}, 1.0)
