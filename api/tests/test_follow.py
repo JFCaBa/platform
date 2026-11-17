@@ -54,21 +54,11 @@ def train(crs="CDF", std="08:12", dest="Cardiff Central", sid=None):
     return {"crs": crs, "std": std, "destination": dest, "serviceId": sid}
 
 
-class Clock:
-    def __init__(self, t=1000.0):
-        self.t = t
-
-    def __call__(self):
-        return self.t
-
-
 class FollowStoreTest(unittest.TestCase):
     def test_upsert_same_train_keeps_baseline_and_start(self):
-        clock = Clock()
-        s = FollowStore(clock=clock)
+        s = FollowStore()
         self.assertEqual(s.upsert("aa", "production", train(), {"platform": "1"}, 900.0), "ok")
         gen = s.for_station("CDF")[0].gen
-        clock.t += 60
         self.assertEqual(s.upsert("aa", "sandbox", train(), {"platform": "9"}, 960.0), "ok")
         (f,) = s.for_station("CDF")
         self.assertEqual(f.last, {"platform": "1"})
@@ -144,6 +134,31 @@ class FollowStoreTest(unittest.TestCase):
         s.upsert("aa", "production", train(), {}, 1.0)
         s.for_station("CDF")[0].missing = 9
         self.assertEqual(s.for_station("CDF")[0].missing, 0)
+
+    def test_store_isolated_from_callers_dicts(self):
+        s = FollowStore()
+        base, tr = {"platform": "1"}, train()
+        s.upsert("aa", "production", tr, base, 1.0)
+        base["platform"] = "X"
+        tr["std"] = "99:99"
+        (f,) = s.for_station("CDF")
+        self.assertEqual((f.last, f.train["std"]), ({"platform": "1"}, "08:12"))
+        f.train["std"] = "00:00"
+        f.last["platform"] = "Y"
+        (g,) = s.for_station("CDF")
+        self.assertEqual((g.last, g.train["std"]), ({"platform": "1"}, "08:12"))
+        new = {"platform": "2"}
+        s.update("aa", g.gen, last=new)
+        new["platform"] = "Z"
+        self.assertEqual(s.for_station("CDF")[0].last, {"platform": "2"})
+
+    def test_update_rejects_unknown_fields(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {}, 1.0)
+        gen = s.for_station("CDF")[0].gen
+        for k in ("gen", "token", "train", "started", "bogus"):
+            with self.assertRaises(TypeError):
+                s.update("aa", gen, **{k: 1})
 
     def test_remove_without_gen(self):
         s = FollowStore()

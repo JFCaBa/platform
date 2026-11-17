@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import threading
-import time
 from dataclasses import dataclass
-from typing import Callable
 
 from .board import HHMM
 
@@ -55,11 +53,16 @@ def changes(before: dict, after: dict) -> list[str]:
     return out
 
 
+_UPDATABLE = {"last", "cancelled_at", "missing"}
 _SAME_KEYS = ("crs", "std", "destination", "serviceId")
 
 
 def _same_train(a: dict, b: dict) -> bool:
     return all(a.get(k) == b.get(k) for k in _SAME_KEYS)
+
+
+def _copy(f: "Follow") -> "Follow":
+    return dataclasses.replace(f, train=dict(f.train), last=dict(f.last) if f.last is not None else None)
 
 
 @dataclass
@@ -76,11 +79,10 @@ class Follow:
 
 class FollowStore:
     """Follows kept in memory only, keyed by device token. Thread-safe. Every new or replaced
-    follow gets a fresh generation so the poller can tell when it was changed under it."""
+    follow gets a fresh generation so the poller can tell when it was changed under it.
+    A same-train upsert refreshes `env` without bumping `gen`."""
 
-    def __init__(self, clock: Callable[[], float] = time.time, max_follows: int = 500,
-                 max_stations: int = 50) -> None:
-        self._clock = clock
+    def __init__(self, max_follows: int = 500, max_stations: int = 50) -> None:
         self._max_follows = max_follows
         self._max_stations = max_stations
         self._lock = threading.Lock()
@@ -99,7 +101,7 @@ class FollowStore:
             if train.get("crs") not in stations and len(stations) >= self._max_stations:
                 return "busy"
             self._gen += 1
-            self._follows[token] = Follow(token, env, dict(train), started, baseline, None, 0, self._gen)
+            self._follows[token] = Follow(token, env, dict(train), started, dict(baseline), None, 0, self._gen)
             return "ok"
 
     def is_same(self, token: str, train: dict) -> bool:
@@ -108,12 +110,15 @@ class FollowStore:
             return cur is not None and _same_train(cur.train, train)
 
     def update(self, token: str, gen: int, **fields) -> bool:
+        bad = set(fields) - _UPDATABLE
+        if bad:
+            raise TypeError(f"cannot update fields: {sorted(bad)}")
         with self._lock:
             cur = self._follows.get(token)
             if cur is None or cur.gen != gen:
                 return False
             for k, v in fields.items():
-                setattr(cur, k, v)
+                setattr(cur, k, dict(v) if k == "last" and v is not None else v)
             return True
 
     def remove(self, token: str, gen: int | None = None) -> None:
@@ -128,7 +133,7 @@ class FollowStore:
 
     def for_station(self, crs: str) -> list[Follow]:
         with self._lock:
-            return [dataclasses.replace(f) for f in self._follows.values() if f.train.get("crs") == crs]
+            return [_copy(f) for f in self._follows.values() if f.train.get("crs") == crs]
 
     def __len__(self) -> int:
         with self._lock:
