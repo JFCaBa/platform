@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from platform_api import server as srv  # noqa: E402
+from platform_api.follow import FollowStore, Poller  # noqa: E402
 
 FIX = Path(__file__).parent / "fixtures"
 KGX = (FIX / "darwin_kgx.json").read_bytes()
@@ -21,6 +22,7 @@ class FakeDarwin:
 
     def __init__(self):
         self.mode = "ok"
+        self.board = KGX  # bytes served for GetDepartureBoard
         self.requests = 0
         self.inflight = 0
         self.max_inflight = 0
@@ -76,7 +78,7 @@ class FakeDarwin:
                             self.send_response(400)
                             self.end_headers()
                             return
-                        body = SERVICE if "GetServiceDetails" in self.path else KGX
+                        body = SERVICE if "GetServiceDetails" in self.path else fake.board
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json")
                         self.send_header("Content-Length", str(len(body)))
@@ -285,6 +287,251 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.get("/departures/")[0], 404)
 
 
+TOKEN = "ab" * 32
+NCL = {"crs": "KGX", "std": "14:33", "destination": "Newcastle", "serviceId": "10740404KNGX____"}
+HOUR_MS = 3600 * 1000
+
+
+def kgx_with(service_id, **fields):
+    """The KGX fixture with one raw Darwin service changed."""
+    data = json.loads(KGX)
+    for s in data["trainServices"]:
+        if s["serviceID"] == service_id:
+            s.update(fields)
+    return json.dumps(data).encode()
+
+
+class FakePush:
+    def __init__(self, result="ok"):
+        self.sent = []
+        self.result = result
+
+    def send(self, token, env, title, body, collapse_id):
+        self.sent.append((token, env, title, body))
+        return self.result
+
+
+class FollowTest(unittest.TestCase):
+    def setUp(self):
+        self.darwin = FakeDarwin()
+        self.log = io.StringIO()
+        self.now = 1_800_000_000.0
+        self.store = FollowStore()
+        self.push = FakePush()
+        self.api = self.serve(follows=self.store, push=self.push)
+
+    def serve(self, **kw):
+        api = srv.make_server("127.0.0.1", 0, darwin_url=self.darwin.url, api_key="test-key",
+                              stations={"KGX", "CLJ", "BHM"}, attribution="Data: National Rail",
+                              log=self.log, clock=lambda: self.now, **kw)
+        threading.Thread(target=api.serve_forever, daemon=True).start()
+        self.addCleanup(api.server_close)
+        self.addCleanup(api.shutdown)
+        return api
+
+    def tearDown(self):
+        self.darwin.httpd.shutdown()
+        self.darwin.httpd.server_close()
+
+    def request(self, method, body, api=None, raw=None, headers=None):
+        api = api or self.api
+        data = raw if raw is not None else json.dumps(body).encode()
+        c = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=30)
+        c.request(method, "/follow", body=data, headers=headers or {})
+        r = c.getresponse()
+        out = r.read()
+        c.close()
+        return r.status, (json.loads(out) if out else None)
+
+    def body(self, **over):
+        b = {"token": TOKEN, "env": "sandbox", **NCL, "startedAt": int(self.now * 1000)}
+        b.update(over)
+        return {k: v for k, v in b.items() if v is not None}
+
+    def poller(self):
+        return Poller(self.store, self.api.fetch_board, self.push, clock=lambda: self.now, log=self.log)
+
+    def test_follow_ok_then_poll_alerts(self):
+        self.assertEqual(self.request("POST", self.body()), (200, {"ok": True}))
+        self.assertEqual(self.darwin.requests, 1)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual((f.token, f.env, f.train, f.started), (TOKEN, "sandbox", NCL, self.now))
+        self.poller().tick()  # unchanged board: the POST reading is the baseline
+        self.assertEqual(self.push.sent, [])
+        self.darwin.board = kgx_with("10740404KNGX____", etd="14:40", platform="4")
+        self.now += 30
+        self.poller().tick()
+        self.assertEqual(self.push.sent, [(TOKEN, "sandbox", "14:33 to Newcastle",
+                                           "Platform 4\nNow expected 14:40")])
+
+    def test_follow_without_service_id_stores_no_service_id(self):
+        self.assertEqual(self.request("POST", self.body(serviceId=None))[0], 200)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.train, {"crs": "KGX", "std": "14:33", "destination": "Newcastle"})
+
+    def test_follow_train_not_on_board_410(self):
+        status, body = self.request("POST", self.body(std="09:00", serviceId=None))
+        self.assertEqual((status, body), (410, {"error": "gone"}))
+        self.assertEqual(len(self.store), 0)
+
+    def test_follow_validation_400(self):
+        cases = {
+            "short token": self.body(token="ab" * 31),
+            "non-hex": self.body(token="zz" * 32),
+            "201 chars": self.body(token="a" * 201),
+            "token not str": self.body(token=12),
+            "bad env": self.body(env="prod"),
+            "std 8:12": self.body(std="8:12"),
+            "unknown CRS": self.body(crs="ZZZ"),
+            "lowercase CRS": self.body(crs="kgx"),
+            "long destination": self.body(destination="x" * 101),
+            "empty destination": self.body(destination=""),
+            "bad serviceId": self.body(serviceId="a/b"),
+            "missing startedAt": {k: v for k, v in self.body().items() if k != "startedAt"},
+            "float startedAt": self.body(startedAt=1.5),
+            "bool startedAt": self.body(startedAt=True),
+            "str startedAt": self.body(startedAt="1800000000000"),
+            "huge startedAt": self.body(startedAt=10 ** 400),
+            "not an object": [1, 2],
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.request("POST", body), (400, {"error": "bad request"}))
+        for name, raw in {"not JSON": b"{nope", "not UTF-8": b"\xff\xfe", "deep": b"[" * 4000,
+                          "5 KB body": json.dumps(self.body(pad="x" * 5000)).encode()}.items():
+            with self.subTest(name):
+                self.assertEqual(self.request("POST", None, raw=raw), (400, {"error": "bad request"}))
+        self.assertEqual(self.darwin.requests, 0)
+        self.assertEqual(len(self.store), 0)
+
+    def test_missing_or_bad_content_length_400(self):
+        for value in [None, "abc", "-1"]:
+            with self.subTest(value):
+                c = http.client.HTTPConnection("127.0.0.1", self.api.server_address[1], timeout=30)
+                c.putrequest("POST", "/follow")
+                if value is not None:
+                    c.putheader("Content-Length", value)
+                c.endheaders()
+                r = c.getresponse()
+                self.assertEqual((r.status, json.loads(r.read())), (400, {"error": "bad request"}))
+                c.close()
+
+    def test_refollow_same_train_no_darwin_call(self):
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        self.now += 60
+        self.assertEqual(self.request("POST", self.body(startedAt=int(self.now * 1000))),
+                         (200, {"ok": True}))
+        self.assertEqual(self.darwin.requests, 1)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.started, self.now - 60)  # the original start is kept
+
+    def test_refollow_after_restart_keeps_original_start(self):
+        started_ms = int((self.now - (2 * 3600 + 50 * 60)) * 1000)
+        self.assertEqual(self.request("POST", self.body(startedAt=started_ms))[0], 200)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.started, started_ms / 1000)
+        self.now += 9 * 60
+        self.poller().tick()
+        self.assertEqual(len(self.store), 1)
+        self.now += 60
+        self.poller().tick()
+        self.assertEqual(len(self.store), 0)
+
+    def test_started_in_future_is_clamped_to_now(self):
+        self.assertEqual(self.request("POST", self.body(startedAt=int((self.now + 600) * 1000)))[0], 200)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.started, self.now)
+
+    def test_started_over_3h_ago_410(self):
+        for ago_ms in [3 * HOUR_MS, 3 * HOUR_MS + 1, 10 * HOUR_MS]:
+            with self.subTest(ago_ms):
+                status, body = self.request("POST", self.body(startedAt=int(self.now * 1000) - ago_ms))
+                self.assertEqual((status, body), (410, {"error": "gone"}))
+        self.assertEqual(self.darwin.requests, 0)
+        self.assertEqual(len(self.store), 0)
+
+    def test_uppercase_token_is_same_follow(self):
+        self.assertEqual(self.request("POST", self.body(token=TOKEN.upper()))[0], 200)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.token, TOKEN)
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        self.assertEqual(self.darwin.requests, 1)  # same follow: no new reading
+        self.assertEqual(self.request("DELETE", {"token": TOKEN})[0], 204)
+        self.assertEqual(len(self.store), 0)
+
+    def test_follow_without_apns_503(self):
+        api = self.serve()
+        for method in ["POST", "DELETE"]:
+            with self.subTest(method):
+                self.assertEqual(self.request(method, self.body(), api=api), (503, {"error": "unavailable"}))
+        self.assertEqual(self.darwin.requests, 0)
+
+    def test_delete_with_body_204(self):
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        self.assertEqual(self.request("DELETE", {"token": TOKEN.upper()}), (204, None))
+        self.assertEqual(len(self.store), 0)
+        self.assertEqual(self.request("DELETE", {"token": TOKEN}), (204, None))  # not there: still 204
+        for bad in [{"token": "nope"}, {}, [TOKEN]]:
+            with self.subTest(bad):
+                self.assertEqual(self.request("DELETE", bad), (400, {"error": "bad request"}))
+        self.assertEqual(self.request("DELETE", None, raw=b"{"), (400, {"error": "bad request"}))
+
+    def test_other_methods_and_paths(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.api.server_address[1], timeout=30)
+        c.request("POST", "/follow/x", body=b"{}")
+        r = c.getresponse()
+        self.assertEqual(r.status, 404)
+        r.read()
+        c.close()
+
+    def test_follow_does_not_use_board_slots(self):
+        held = 0
+        while self.api.slots.acquire(blocking=False):
+            held += 1
+        try:
+            self.assertEqual(self.request("POST", self.body())[0], 200)
+        finally:
+            for _ in range(held):
+                self.api.slots.release()
+        self.assertEqual(held, 8)
+
+    def test_poll_slots_full_503_after_wait(self):
+        api = self.serve(follows=FollowStore(), push=self.push, follow_wait_s=0.5)
+        self.assertTrue(api.poll_slots.acquire(blocking=False))
+        self.assertTrue(api.poll_slots.acquire(blocking=False))
+        self.assertFalse(api.poll_slots.acquire(blocking=False))  # pool of 2
+        try:
+            t0 = time.monotonic()
+            self.assertEqual(self.request("POST", self.body(), api=api), (503, {"error": "busy"}))
+            self.assertGreaterEqual(time.monotonic() - t0, 0.5)
+        finally:
+            api.poll_slots.release()
+            api.poll_slots.release()
+        self.assertEqual(self.darwin.requests, 0)
+        self.assertEqual(self.request("POST", self.body(), api=api)[0], 200)
+
+    def test_follow_caps_503(self):
+        api = self.serve(follows=FollowStore(max_follows=1), push=self.push)
+        self.assertEqual(self.request("POST", self.body(), api=api)[0], 200)
+        self.assertEqual(self.request("POST", self.body(token="cd" * 32), api=api), (503, {"error": "busy"}))
+
+    def test_follow_upstream_errors(self):
+        for mode, expected in [("error", (502, {"error": "upstream"})), ("null", (502, {"error": "upstream"})),
+                               ("429", (429, {"error": "rate limited"}))]:
+            with self.subTest(mode):
+                self.darwin.mode = mode
+                self.assertEqual(self.request("POST", self.body()), expected)
+        self.assertEqual(len(self.store), 0)
+        self.assertEqual(self.log.getvalue(), "")
+
+    def test_follow_logs_nothing(self):
+        self.request("POST", self.body())
+        self.request("POST", self.body())
+        self.request("POST", self.body(token="x"))
+        self.request("DELETE", {"token": TOKEN})
+        self.assertEqual(self.log.getvalue(), "")
+
+
 class StationsTest(unittest.TestCase):
     def test_load_stations_falls_back_to_bundled(self):
         known = srv.load_stations("http://127.0.0.1:9/nothing.json", srv.BUNDLED_STATIONS)
@@ -314,6 +561,52 @@ class StationsTest(unittest.TestCase):
         self.assertEqual((seen["host"], seen["port"]), ("0.0.0.0", 8510))
         self.assertEqual(seen["darwin_url"], srv.DARWIN_URL)
         self.assertEqual(seen["api_key"], "k")
+        self.assertIsNone(seen["push"])  # no APNs secrets: /follow answers 503, no poller
+
+    def test_main_with_apns_starts_poller(self):
+        import base64
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        pem = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+        seen, runs = {}, []
+
+        class Dummy:
+            server_address = ("0.0.0.0", 8510)
+            stations = {"KGX"}
+
+            def fetch_board(self, crs):
+                return {}
+
+            def serve_forever(self):
+                pass
+
+        class FakePoller:
+            def __init__(self, store, fetch_board, push, **kw):
+                runs.append((store, fetch_board, push))
+
+            def run(self, stop, every=30.0):
+                runs.append(stop)
+
+        def fake_make(host, port, **kw):
+            seen.update(kw)
+            return Dummy()
+
+        orig = srv.make_server, srv.load_stations, srv.Poller
+        srv.make_server, srv.load_stations, srv.Poller = fake_make, (lambda url, fb: {"KGX"}), FakePoller
+        try:
+            env = {"DARWIN_API_KEY": "k", "APNS_KEY": base64.b64encode(pem).decode(),
+                   "APNS_KEY_ID": "KID", "APNS_TEAM_ID": "TEAM"}
+            self.assertEqual(srv.main(env=env), 0)
+        finally:
+            srv.make_server, srv.load_stations, srv.Poller = orig
+        time.sleep(0.2)
+        self.assertIsNotNone(seen["push"])
+        self.assertIsInstance(seen["follows"], FollowStore)
+        store, _, push = runs[0]
+        self.assertIs(store, seen["follows"])
+        self.assertIs(push, seen["push"])
+        self.assertIsInstance(runs[1], threading.Event)
 
     def test_missing_key_exits_1(self):
         self.assertEqual(srv.main(env={}), 1)

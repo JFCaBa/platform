@@ -1,6 +1,8 @@
-"""Platform API: GET /departures/{CRS} → next departures (Darwin, reshaped), GET /health.
+"""Platform API: GET /departures/{CRS} → next departures (Darwin, reshaped), GET /health,
+POST/DELETE /follow → push alerts (APNs) for one followed train per device.
 
-Privacy: requests are not logged; only Darwin failures (station code + reason).
+Privacy: requests are not logged; only board/stop Darwin failures (station code + reason).
+Follows live in memory only and nothing about them is logged.
 Load: at most `max_inflight` concurrent Darwin calls (more → 503); nginx caches 30 s
 per CRS in front of this.
 """
@@ -21,7 +23,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Collection, TextIO
 
-from .board import to_board, to_stops
+from .apns import Apns
+from .board import HHMM, to_board, to_stops
+from .follow import MAX_DURATION, FollowStore, Poller, find_followed
 
 DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
               "/LDBWS/api/20220120/GetDepartureBoard")
@@ -37,6 +41,15 @@ CRS_RE = re.compile(r"^[A-Z]{3}$")
 SERVICE_PATH = re.compile(r"^/service/(.*)$")
 SERVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,40}$")  # e.g. 10741504KNGX____
 USER_AGENT = "platform-api/1.0"
+TOKEN_RE = re.compile(r"[0-9a-fA-F]{64,200}")
+ENVS = ("production", "sandbox")
+MAX_FOLLOW_BODY = 4096
+MAX_DESTINATION = 100
+MAX_STARTED_MS = 10 ** 15  # far beyond any real epoch ms; keeps the float division safe
+
+
+class Busy(Exception):
+    """No poll slot became free in time."""
 
 
 class Upstream(Exception):
@@ -115,12 +128,47 @@ class _Server(ThreadingHTTPServer):
     request_queue_size = 128  # default 5 resets bursts of connections
 
 
+def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, dict, int] | None:
+    """(token lowercased, env, train, startedAt ms) from a POST /follow body, or None if invalid."""
+    if not isinstance(body, dict):
+        return None
+    token, env = body.get("token"), body.get("env")
+    crs, std, dest = body.get("crs"), body.get("std"), body.get("destination")
+    sid, started = body.get("serviceId"), body.get("startedAt")
+    if not (isinstance(token, str) and TOKEN_RE.fullmatch(token) and env in ENVS
+            and isinstance(crs, str) and CRS_RE.fullmatch(crs) and crs in stations
+            and isinstance(std, str) and HHMM.fullmatch(std)
+            and isinstance(dest, str) and 0 < len(dest) <= MAX_DESTINATION
+            and (sid is None or (isinstance(sid, str) and SERVICE_ID_RE.fullmatch(sid)))
+            and isinstance(started, int) and not isinstance(started, bool)
+            and 0 <= started < MAX_STARTED_MS):
+        return None
+    train = {"crs": crs, "std": std, "destination": dest}
+    if sid is not None:
+        train["serviceId"] = sid
+    return token.lower(), env, train, started
+
+
 def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations: Collection[str],
                 attribution: str, service_url: str | None = None, service_key: str | None = None, deadline_s: float = 8.0, max_inflight: int = 8,
-                log: TextIO = sys.stderr) -> ThreadingHTTPServer:
+                log: TextIO = sys.stderr, follows: FollowStore | None = None, push=None,
+                follow_wait_s: float = 5.0, clock=time.time) -> ThreadingHTTPServer:
     slots = threading.BoundedSemaphore(max_inflight)
     # Stop lookups have their own, smaller pool: they must never leave the boards without a slot.
     service_slots = threading.BoundedSemaphore(max(1, max_inflight // 2))
+    # Follow POSTs and the poller share their own pool: following never takes a board's slot.
+    poll_slots = threading.BoundedSemaphore(2)
+
+    def fetch_board(crs: str, wait: float | None = None) -> dict:
+        """One board reading for /follow and the poller. Blocks for a poll slot (up to `wait`
+        seconds when given, else Busy). Raises Upstream or a shape error; never logs."""
+        if not poll_slots.acquire(timeout=-1 if wait is None else wait):
+            raise Busy()
+        try:
+            raw = fetch_darwin(f"{darwin_url}/{crs}{QUERY}", api_key, deadline_s)
+            return to_board(raw, crs, attribution, datetime.now(timezone.utc))
+        finally:
+            poll_slots.release()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "platform-api"
@@ -201,8 +249,77 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 slots.release()
             self.send_json(200, board, cache="max-age=30")
 
+        def read_json(self) -> tuple[bool, object]:
+            """(ok, value) for a JSON body of exactly Content-Length bytes, at most 4 KB."""
+            try:
+                n = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                return False, None
+            if not 0 <= n <= MAX_FOLLOW_BODY:
+                return False, None  # not read: HTTP/1.0, the connection closes after the reply
+            try:
+                return True, json.loads(self.rfile.read(n))
+            except (ValueError, RecursionError):
+                return False, None
+
+        def follow_unavailable(self) -> bool:
+            if follows is None or push is None:
+                self.send_json(503, {"error": "unavailable"})
+                return True
+            return False
+
+        def do_POST(self):
+            if self.path != "/follow":
+                return self.send_json(404, {"error": "not found"})
+            if self.follow_unavailable():
+                return
+            ok, body = self.read_json()
+            req = _follow_request(body, self.server.stations) if ok else None
+            if req is None:
+                return self.send_json(400, {"error": "bad request"})
+            token, env, train, started_ms = req
+            now = clock()
+            if now - started_ms / 1000 >= MAX_DURATION:
+                return self.send_json(410, {"error": "gone"})
+            if follows.is_same(token, train):  # app re-sync: keep baseline and original start
+                return self.send_json(200, {"ok": True})
+            try:
+                board = fetch_board(train["crs"], wait=follow_wait_s)
+            except Busy:
+                return self.send_json(503, {"error": "busy"})
+            except Upstream as e:
+                if e.status == 429:
+                    return self.send_json(429, {"error": "rate limited"})
+                return self.send_json(502, {"error": "upstream"})
+            except (AttributeError, TypeError, ValueError, KeyError):
+                return self.send_json(502, {"error": "upstream"})
+            found = find_followed(board, train)
+            if found is None:
+                return self.send_json(410, {"error": "gone"})
+            started = min(max(started_ms / 1000, now - MAX_DURATION), now)
+            if follows.upsert(token, env, train, found, started) != "ok":
+                return self.send_json(503, {"error": "busy"})
+            self.send_json(200, {"ok": True})
+
+        def do_DELETE(self):
+            if self.path != "/follow":
+                return self.send_json(404, {"error": "not found"})
+            if self.follow_unavailable():
+                return
+            ok, body = self.read_json()
+            token = body.get("token") if ok and isinstance(body, dict) else None
+            if not (isinstance(token, str) and TOKEN_RE.fullmatch(token)):
+                return self.send_json(400, {"error": "bad request"})
+            follows.remove(token.lower())
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
     httpd = _Server((host, port), Handler)
     httpd.stations = stations
+    httpd.slots = slots
+    httpd.poll_slots = poll_slots
+    httpd.fetch_board = fetch_board
     return httpd
 
 
@@ -213,12 +330,18 @@ def main(env: dict | None = None) -> int:
         print("DARWIN_API_KEY missing", file=sys.stderr)
         return 1
     stations_url = env.get("STATIONS_URL", STATIONS_URL)
+    push = Apns.from_env(env)  # None without APNs secrets: /follow answers 503
+    follows = FollowStore() if push is not None else None
     # Port fixed inside the container; PORT in .env only changes the host side (compose).
     httpd = make_server("0.0.0.0", 8510, darwin_url=env.get("DARWIN_URL", DARWIN_URL),
                         api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS),
                         service_url=env.get("SERVICE_URL", SERVICE_URL),
                         service_key=env.get("DARWIN_SERVICE_KEY", "").strip() or None,
-                        attribution=ATTRIBUTION)
+                        attribution=ATTRIBUTION, follows=follows, push=push)
+    if push is not None:
+        stop = threading.Event()
+        poller = Poller(follows, httpd.fetch_board, push)
+        threading.Thread(target=poller.run, args=(stop,), daemon=True).start()
 
     def refresh():
         while True:
