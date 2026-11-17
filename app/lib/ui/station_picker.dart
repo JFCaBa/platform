@@ -14,7 +14,11 @@ Future<String?> pickStation(BuildContext context, StationIndex index, (double, d
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) => _Picker(index: index, coords: coords),
+      // keep the results above the keyboard
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+        child: _Picker(index: index, coords: coords),
+      ),
     );
 
 class _Picker extends StatefulWidget {
@@ -28,6 +32,7 @@ class _Picker extends StatefulWidget {
 
 class _PickerState extends State<_Picker> {
   String _query = '';
+  List<Station> _results = const [];
   late final List<Station> _nearby = _nearest();
 
   List<Station> _nearest() {
@@ -45,7 +50,7 @@ class _PickerState extends State<_Picker> {
 
   @override
   Widget build(BuildContext context) {
-    final results = _query.trim().isEmpty ? _nearby : widget.index.search(_query);
+    final results = _query.trim().isEmpty ? _nearby : _results;
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.8,
@@ -60,7 +65,10 @@ class _PickerState extends State<_Picker> {
               hintText: 'Station name or code',
               border: OutlineInputBorder(),
             ),
-            onChanged: (q) => setState(() => _query = q),
+            onChanged: (q) => setState(() {
+              _query = q;
+              _results = widget.index.search(q);
+            }),
           ),
         ),
         Expanded(
