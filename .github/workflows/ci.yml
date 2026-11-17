@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # api needs httpx/PyJWT for APNs; pipeline has no requirements
+      - run: if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       # exit code 5 = no tests collected yet (only until the first tests land)
       - run: python -m unittest discover -s tests -v || [ $? -eq 5 ]
   flutter:
