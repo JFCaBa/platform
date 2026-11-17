@@ -37,6 +37,7 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
   without explicit confirmation.
 
 ## Play (17-11-2026)
-- Prueba cerrada "Alpha": Reino Unido, lista "Beta testers", feedback https://whatplatform.uk/. Borrador de versión con el AAB 4 (1.0.0) y notas en en-GB.
-- Hecho: política de privacidad, acceso (sin restricciones), anuncios (no), público objetivo (18+), textos de la ficha (borrador).
-- Pendiente (usuario): icono, gráfico destacado y capturas; categoría y contacto; clasificación de contenido (IARC); seguridad de los datos; declaraciones (gobierno, finanzas, salud). Luego enviar a revisión.
+- Prueba cerrada "Alpha": Reino Unido, lista "Beta testers", feedback https://whatplatform.uk/. Versión 4 (1.0.0).
+- Ficha completa (textos, icono, gráfico, 4 capturas; categoría Travel & Local), contenido de la app y declaraciones hechas (PEGI 3 / ESRB E, sin datos recogidos, sin advertising ID, público 18+).
+- **Enviada a revisión el 17-11-2026.** Publicación gestionada desactivada: al aprobarse, la prueba se activa sola.
+- Después: enlace de participación a los probadores; 14 días con ≥ 12 inscritos; luego pedir acceso a producción.
