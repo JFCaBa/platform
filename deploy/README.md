@@ -41,7 +41,7 @@ The privacy page is served straight from `/opt/platform/repo/site`, so `git pull
 
 Produce `APNS_KEY` from the `.p8` with `base64 -i AuthKey_XXXX.p8 | tr -d '\n'`.
 Follows live only in the API's memory: deploy outside UK commuting peaks, because a restart forgets follows.
-The API image now installs `requirements.txt` (already in the Dockerfile), so rebuild with `docker compose up -d --build`.
+Rebuild with `docker compose up -d --build` so the image picks up the new dependencies.
 
 ## Check
 
@@ -51,3 +51,9 @@ nginx blocks `curl/` user agents (bot filter): pass `-A platform-check`.
 curl -s -A platform-check https://api.whatplatform.uk/departures/KGX | head -c 300
 curl -s -A platform-check -o /dev/null -D - https://api.whatplatform.uk/departures/KGX | grep -i x-cache   # HIT on the 2nd call within 30 s
 ```
+
+```sh
+curl -s -A platform-check -X POST https://api.whatplatform.uk/follow -d '{}'   # {"error":"bad request"} (400)
+```
+
+Without the `APNS_*` variables a valid `/follow` body answers `503 unavailable`.
