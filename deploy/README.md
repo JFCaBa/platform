@@ -1,6 +1,6 @@
 # Deploy (VPS `ssh myairports`)
 
-Layout: `/opt/platform/repo` (clone), `/opt/platform/.env` (root, 600: `DARWIN_API_KEY=...` for the board and `DARWIN_SERVICE_KEY=...` for Service Details (train stops; without it `/service/` answers 503), written by hand, never in git;
+Layout: `/opt/platform/repo` (clone), `/opt/platform/.env` (root, 600: `DARWIN_API_KEY=...` for the board and `DARWIN_SERVICE_KEY=...` for Service Details (train stops; without it `/service/` answers 503), plus, for iPhone follow alerts, `APNS_KEY=` (base64 of the Apple `.p8` key), `APNS_KEY_ID=` and `APNS_TEAM_ID=`; without them `/follow` answers `503 unavailable`. Written by hand, never in git;
 `api/compose.yaml` reads it through `env_file`).
 
 Relies on what this server already has for its other sites: `snippets/block-bad-bots.conf`, `snippets/honeypot.conf`,
@@ -36,6 +36,12 @@ sudo cp ../deploy/nginx/whatplatform.uk.conf /etc/nginx/sites-enabled/ && sudo n
 ```
 
 The privacy page is served straight from `/opt/platform/repo/site`, so `git pull` updates it.
+
+### APNs key and restarts
+
+Produce `APNS_KEY` from the `.p8` with `base64 -i AuthKey_XXXX.p8 | tr -d '\n'`.
+Follows live only in the API's memory: deploy outside UK commuting peaks, because a restart forgets follows.
+The API image now installs `requirements.txt` (already in the Dockerfile), so rebuild with `docker compose up -d --build`.
 
 ## Check
 
