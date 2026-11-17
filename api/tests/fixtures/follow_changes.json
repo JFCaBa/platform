@@ -1,0 +1,124 @@
+[
+ {
+  "before": {},
+  "after": {
+   "platform": "5"
+  },
+  "alerts": [
+   "Platform 5"
+  ]
+ },
+ {
+  "before": {
+   "platform": "3"
+  },
+  "after": {
+   "platform": "5"
+  },
+  "alerts": [
+   "Platform changed: 3 → 5"
+  ]
+ },
+ {
+  "before": {
+   "platform": "3"
+  },
+  "after": {},
+  "alerts": []
+ },
+ {
+  "before": {
+   "etd": "On time"
+  },
+  "after": {
+   "etd": "08:19"
+  },
+  "alerts": [
+   "Now expected 08:19"
+  ]
+ },
+ {
+  "before": {
+   "etd": "08:19"
+  },
+  "after": {
+   "etd": "08:19"
+  },
+  "alerts": []
+ },
+ {
+  "before": {
+   "etd": "08:19"
+  },
+  "after": {
+   "etd": "On time"
+  },
+  "alerts": [
+   "Now on time"
+  ]
+ },
+ {
+  "before": {
+   "etd": "On time"
+  },
+  "after": {
+   "etd": "Delayed"
+  },
+  "alerts": [
+   "Delayed"
+  ]
+ },
+ {
+  "before": {},
+  "after": {
+   "etd": "On time"
+  },
+  "alerts": []
+ },
+ {
+  "before": {
+   "platform": "3",
+   "etd": "On time"
+  },
+  "after": {
+   "platform": "5",
+   "etd": "08:19"
+  },
+  "alerts": [
+   "Platform changed: 3 → 5",
+   "Now expected 08:19"
+  ]
+ },
+ {
+  "before": {
+   "platform": "3"
+  },
+  "after": {
+   "platform": "5",
+   "cancelled": true,
+   "cancelReason": "a signalling problem"
+  },
+  "alerts": [
+   "Cancelled: a signalling problem"
+  ]
+ },
+ {
+  "before": {},
+  "after": {
+   "etd": "Cancelled"
+  },
+  "alerts": [
+   "Cancelled"
+  ]
+ },
+ {
+  "before": {
+   "cancelled": true
+  },
+  "after": {
+   "cancelled": true,
+   "platform": "4"
+  },
+  "alerts": []
+ }
+]

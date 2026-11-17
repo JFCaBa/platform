@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:platform_app/data/departures.dart';
 import 'package:platform_app/follow/follow_logic.dart';
@@ -57,6 +60,19 @@ void main() {
         ['Cancelled: a signalling problem']);
     expect(changes(dep(), dep(etd: 'Cancelled')), ['Cancelled']);
     expect(changes(dep(cancelled: true), dep(cancelled: true, platform: '4')), isEmpty);
+  });
+
+  test('changes match the shared fixture', () {
+    final cases = jsonDecode(File('../api/tests/fixtures/follow_changes.json').readAsStringSync()) as List;
+    expect(cases, isNotEmpty);
+    Departure from(Map<String, dynamic> j) => dep(
+        etd: j['etd'] as String?,
+        platform: j['platform'] as String?,
+        cancelled: j['cancelled'] as bool? ?? false,
+        cancelReason: j['cancelReason'] as String?);
+    for (final c in cases) {
+      expect(changes(from(c['before']), from(c['after'])), (c['alerts'] as List).cast<String>(), reason: '$c');
+    }
   });
 
   test('FollowedTrain json round-trip', () {
