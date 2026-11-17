@@ -47,7 +47,7 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 - Ficha: descripción sin el seguimiento Android, keywords, subtítulo, soporte/privacidad https://whatplatform.uk/,
   copyright "2026 What Platform", 6 capturas 6.3" (incluye `06-stops.png`), notas del revisor (`review-notes-en.md`),
   sin login. Categoría Travel + Navigation. Content rights: sí, con derechos. Edad 4+. App Privacy: Data Not Collected.
-  Gratis, todos los países.
+  Gratis, 174 países: todos menos China continental (pide Security Assessment y declaración AIGC).
 - Política de privacidad nueva publicada (git pull en el VPS).
 - Pendiente (usuario): contacto del revisor, "Add for Review" y envío.
 
