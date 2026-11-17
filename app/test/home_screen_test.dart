@@ -5,6 +5,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:platform_app/app_controller.dart';
 import 'package:platform_app/config.dart';
 import 'package:platform_app/data/departures.dart';
+import 'package:platform_app/follow/follow_logic.dart';
+import 'package:platform_app/follow/follower.dart';
 import 'package:platform_app/main.dart';
 import 'package:platform_app/ui/home_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,7 +34,7 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
-  Future<AppController> pumpHome(WidgetTester tester) async {
+  Future<AppController> pumpHome(WidgetTester tester, {Follower? follower}) async {
     late AppController c;
     await tester.runAsync(() async {
       c = AppController(server.client, dir, DeparturesClient(server.client), location,
@@ -40,7 +42,7 @@ void main() {
       await c.start();
       await Future<void>.delayed(const Duration(milliseconds: 30));
     });
-    await tester.pumpWidget(MaterialApp(home: HomeScreen(controller: c, openUrl: (u) async => opened.add(u))));
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(controller: c, openUrl: (u) async => opened.add(u), follower: follower)));
     await tester.pump();
     return c;
   }
@@ -209,5 +211,69 @@ void main() {
     });
     await tester.pumpWidget(PlatformApp(controller: c));
     expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'What Platform');
+  });
+  group('follow a train', () {
+    const cambridge = FollowedTrain(crs: 'KGX', std: '09:30', destination: 'Cambridge');
+    final bell = find.byIcon(Icons.notifications_active);
+    setUp(() => server.boards['KGX'] = boardJson('KGX', clockNow, services: [
+          service('09:20', destination: 'Leeds'),
+          service('09:30', destination: 'Cambridge', platform: '10'),
+        ]));
+
+    testWidgets('tapping a row follows it', (tester) async {
+      final f = FakeFollower();
+      await pumpHome(tester, follower: f);
+      expect(bell, findsNothing);
+      await tester.tap(find.text('09:30'));
+      await tester.pump();
+      expect(f.current, cambridge);
+      expect(find.text('Following 09:30 to Cambridge'), findsOneWidget);
+      expect(bell, findsOneWidget);
+      final bellY = tester.getCenter(bell).dy;
+      expect((bellY - tester.getCenter(find.text('Plat 10')).dy).abs(), lessThan(30)); // on the Cambridge row
+    });
+
+    testWidgets('Undo stops following', (tester) async {
+      final f = FakeFollower();
+      await pumpHome(tester, follower: f);
+      await tester.tap(find.text('09:30'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1)); // snackbar slid in
+      await tester.tap(find.text('Undo'));
+      await tester.pump();
+      expect(f.current, isNull);
+      expect(bell, findsNothing);
+    });
+
+    testWidgets('tapping the followed row stops', (tester) async {
+      final f = FakeFollower()..current = cambridge;
+      await pumpHome(tester, follower: f);
+      expect(bell, findsOneWidget);
+      await tester.tap(find.text('09:30'));
+      await tester.pump();
+      expect(f.current, isNull);
+      expect(find.text('Stopped following'), findsOneWidget);
+    });
+
+    testWidgets('permission denied', (tester) async {
+      final f = FakeFollower(granted: false);
+      await pumpHome(tester, follower: f);
+      await tester.tap(find.text('09:30'));
+      await tester.pump();
+      expect(f.current, isNull);
+      expect(find.text('Allow notifications to follow a train'), findsOneWidget);
+      expect(bell, findsNothing);
+    });
+
+    testWidgets('bell only on the followed station', (tester) async {
+      final f = FakeFollower()..current = const FollowedTrain(crs: 'CBG', std: '09:30', destination: 'Cambridge');
+      await pumpHome(tester, follower: f);
+      expect(bell, findsNothing);
+    });
+
+    testWidgets('no follower, rows are not tappable', (tester) async {
+      await pumpHome(tester);
+      expect(find.ancestor(of: find.text('09:30'), matching: find.byType(InkWell)), findsNothing);
+    });
   });
 }

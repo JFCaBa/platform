@@ -70,6 +70,9 @@ class Board {
       );
 }
 
+/// How long to wait after a 429.
+const rateLimitBackoff = Duration(minutes: 5);
+
 /// Darwin asked us to slow down (429): back off for minutes.
 class RateLimited implements Exception {
   const RateLimited();

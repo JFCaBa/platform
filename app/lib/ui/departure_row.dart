@@ -1,19 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../data/departures.dart';
+import '../domain/departure_text.dart';
 
-final _hhmm = RegExp(r'^\d{2}:\d{2}$');
-
-/// "Cancelled" | "On time" | "Exp 10:22" | "Delayed" | "" (no estimate).
-String statusText(Departure d) {
-  if (d.cancelled || d.etd == 'Cancelled') return 'Cancelled';
-  final etd = d.etd;
-  if (etd == null) return '';
-  if (_hhmm.hasMatch(etd)) return 'Exp $etd';
-  return etd; // "On time", "Delayed"
-}
-
-String? platformText(Departure d) => d.platform == null ? null : 'Plat ${d.platform}';
+export '../domain/departure_text.dart' show statusText, platformText;
 
 /// Width that fits the widest time and status at the phone's text size, so the column
 /// never wraps ("16:2" / "3") and destinations line up in every row.
@@ -36,24 +26,30 @@ double timeColumnWidth(BuildContext context, TextStyle? time, TextStyle? status)
 /// One departure: scheduled time and status on the left, destination in the middle,
 /// platform large on the right. Times are shown exactly as the API gives them.
 class DepartureRow extends StatelessWidget {
-  const DepartureRow(this.d, {super.key});
+  const DepartureRow(this.d, {super.key, this.followed = false, this.onTap});
   final Departure d;
+
+  /// This is the train being followed: shows a bell.
+  final bool followed;
+
+  /// Null: the row is not tappable.
+  final VoidCallback? onTap;
 
   /// Above this the time column and the platform badge no longer fit on a narrow phone.
   static const maxTextScale = 1.5;
 
   @override
-  Widget build(BuildContext context) => MediaQuery.withClampedTextScaling(
-        maxScaleFactor: maxTextScale,
-        child: Builder(builder: _row),
-      );
+  Widget build(BuildContext context) {
+    final row = MediaQuery.withClampedTextScaling(maxScaleFactor: maxTextScale, child: Builder(builder: _row));
+    return onTap == null ? row : InkWell(onTap: onTap, child: row);
+  }
 
   Widget _row(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final cancelled = d.cancelled || d.etd == 'Cancelled';
+    final cancelled = isCancelled(d);
     final status = statusText(d);
-    final late = cancelled || d.etd == 'Delayed' || (d.etd != null && _hhmm.hasMatch(d.etd!));
+    final late = cancelled || d.etd == 'Delayed' || (d.etd != null && hhmm.hasMatch(d.etd!));
     final reason = cancelled ? d.cancelReason : d.delayReason;
     final plat = platformText(d);
     final muted = theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
@@ -86,6 +82,11 @@ class DepartureRow extends StatelessWidget {
           ]),
         ),
         const SizedBox(width: 8),
+        if (followed)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, right: 8),
+            child: Icon(Icons.notifications_active, size: 20, color: scheme.primary, semanticLabel: 'Following'),
+          ),
         if (plat != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

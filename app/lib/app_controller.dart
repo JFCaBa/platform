@@ -19,7 +19,6 @@ String _filtersKey(String crs) => 'filters_$crs';
 const refreshInterval = Duration(seconds: 30);
 const staleAfter = Duration(minutes: 2);
 const expireAfter = Duration(minutes: 10);
-const rateLimitBackoff = Duration(minutes: 5);
 
 typedef PeriodicTimerFactory = Timer Function(Duration, void Function(Timer));
 

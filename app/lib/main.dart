@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
@@ -7,6 +10,8 @@ import 'package:timezone/data/latest.dart' as tzdata;
 
 import 'app_controller.dart';
 import 'data/departures.dart';
+import 'follow/follow_service.dart';
+import 'follow/follower.dart';
 import 'location.dart';
 import 'ui/home_screen.dart';
 
@@ -22,12 +27,15 @@ Future<void> main() async {
     GeolocatorLocationSource(),
     await SharedPreferences.getInstance(),
   );
-  runApp(PlatformApp(controller: controller));
+  // Following a train needs a background service: Android only for now.
+  final follower = !kIsWeb && Platform.isAndroid ? await FollowService.create() : null;
+  runApp(PlatformApp(controller: controller, follower: follower));
 }
 
 class PlatformApp extends StatefulWidget {
-  const PlatformApp({super.key, required this.controller});
+  const PlatformApp({super.key, required this.controller, this.follower});
   final AppController controller;
+  final Follower? follower;
 
   @override
   State<PlatformApp> createState() => _PlatformAppState();
@@ -50,7 +58,10 @@ class _PlatformAppState extends State<PlatformApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) widget.controller.onForeground();
+    if (state == AppLifecycleState.resumed) {
+      widget.controller.onForeground();
+      widget.follower?.sync();
+    }
     if (state == AppLifecycleState.paused) widget.controller.onBackground();
   }
 
@@ -63,7 +74,7 @@ class _PlatformAppState extends State<PlatformApp> with WidgetsBindingObserver {
       themeMode: ThemeMode.system,
       theme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.light),
       darkTheme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.dark),
-      home: HomeScreen(controller: widget.controller),
+      home: HomeScreen(controller: widget.controller, follower: widget.follower),
     );
   }
 }

@@ -25,12 +25,14 @@ gradle.taskGraph.whenReady {
 
 android {
     namespace = "com.jfcaba.platform"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37 // flutter_local_notifications and androidx.core need 37; targetSdk unchanged
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications needs java.time on old Android versions
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -73,4 +75,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

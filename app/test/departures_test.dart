@@ -68,7 +68,7 @@ void main() {
       final b = await client((_) async => okJson(boardBody)).fetch('KGX');
       expect(b.services.length, 20);
       expect(requests.single.url.toString(), '$apiBaseUrl/departures/KGX');
-      expect(requests.single.headers['User-Agent'], 'WhatPlatform/1.0');
+      expect(requests.single.headers['User-Agent'], 'WhatPlatform/1.1');
     });
 
     test('429 → RateLimited (only Darwin asking us to slow down)', () async {

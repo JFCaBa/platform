@@ -4,6 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_controller.dart';
 import '../config.dart';
 import '../data/departures.dart';
+import '../follow/follow_logic.dart';
+import '../follow/follower.dart';
 import 'departure_row.dart';
 import 'format.dart';
 import 'station_picker.dart';
@@ -12,8 +14,11 @@ import 'station_picker.dart';
 const farFromStationMeters = 25000;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.controller, this.openUrl = _launchExternal});
+  const HomeScreen({super.key, required this.controller, this.openUrl = _launchExternal, this.follower});
   final AppController controller;
+
+  /// Null where trains cannot be followed (iOS for now): rows are then not tappable.
+  final Follower? follower;
 
   /// Opens a web page; injectable for tests.
   final Future<void> Function(Uri) openUrl;
@@ -53,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: controller,
+        listenable: Listenable.merge([controller, ?widget.follower]),
         builder: (context, _) => Scaffold(body: SafeArea(child: _body(context))),
       );
 
@@ -143,6 +148,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _row(BuildContext context, Board b, Departure d) => _rowFor(context, widget.follower, b, d);
+
   List<Widget> _board(BuildContext context, Board b) {
     final c = controller;
     final updated = 'Last updated ${londonHhmm(b.generatedAt)}';
@@ -161,10 +168,39 @@ class _HomeScreenState extends State<HomeScreen> {
         else if (c.visibleServices.isEmpty)
           const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('No trains to these destinations right now'))
         else
-          for (final d in c.visibleServices) DepartureRow(d),
+          for (final d in c.visibleServices) _row(context, b, d),
       ],
     ];
   }
+}
+
+Widget _rowFor(BuildContext context, Follower? follower, Board b, Departure d) {
+  if (follower == null) return DepartureRow(d);
+  final t = FollowedTrain(crs: b.crs, std: d.std, destination: d.destination);
+  final followed = follower.current == t;
+  return DepartureRow(d, followed: followed, onTap: () => _toggleFollow(context, follower, t, followed));
+}
+
+Future<void> _toggleFollow(BuildContext context, Follower follower, FollowedTrain t, bool followed) async {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  if (followed) {
+    await follower.stop();
+    messenger.showSnackBar(const SnackBar(content: Text('Stopped following')));
+    return;
+  }
+  final previous = follower.current;
+  if (!await follower.follow(t)) {
+    messenger.showSnackBar(const SnackBar(content: Text('Allow notifications to follow a train')));
+    return;
+  }
+  messenger.showSnackBar(SnackBar(
+    content: Text('Following ${t.title}'),
+    action: SnackBarAction(
+      label: 'Undo',
+      onPressed: () => previous == null ? follower.stop() : follower.follow(previous),
+    ),
+  ));
 }
 
 class _FilterChips extends StatelessWidget {

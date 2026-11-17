@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:platform_app/follow/follow_logic.dart';
+import 'package:platform_app/follow/follower.dart';
 import 'package:platform_app/location.dart';
 
 String fixture(String name) => File('test/fixtures/$name').readAsStringSync();
@@ -139,4 +142,28 @@ class FakeTimer implements Timer {
   bool get isActive => _active;
   @override
   int get tick => 0;
+}
+
+class FakeFollower extends ChangeNotifier implements Follower {
+  FakeFollower({this.granted = true});
+  bool granted;
+  @override
+  FollowedTrain? current;
+
+  @override
+  Future<bool> follow(FollowedTrain t) async {
+    if (!granted) return false;
+    current = t;
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  Future<void> stop() async {
+    current = null;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> sync() async {}
 }
