@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import unittest
 
@@ -42,10 +43,11 @@ class ApnsTest(unittest.TestCase):
         content = json.dumps({"reason": self.reason}) if self.reason else b""
         return httpx.Response(self.status, content=content)
 
-    def apns(self):
+    def apns(self, pem=None):
+        self.log = io.StringIO()
         return Apns(
-            self.pem, "KEYID12345", "TEAMID1234",
-            clock=self.clock, transport=httpx.MockTransport(self.handler),
+            pem or self.pem, "KEYID12345", "TEAMID1234",
+            clock=self.clock, transport=httpx.MockTransport(self.handler), log=self.log,
         )
 
     def test_request_shape(self):
@@ -134,6 +136,74 @@ class ApnsTest(unittest.TestCase):
         self.assertEqual(sent["title"], title)
         self.assertTrue(body.startswith(sent["body"]))
         self.assertGreater(len(sent["body"]), 3000)
+
+    def test_payload_truncation_is_maximal(self):
+        title = "08:12 to Cardiff Central"
+        body = "Platform changed: 3 \u2192 5\n" * 500
+        self.apns().send("ab" * 32, "production", title, body, "c")
+        content = self.requests[0].content
+        sent = json.loads(content)["aps"]["alert"]["body"]
+        self.assertLessEqual(len(content), 4096)
+        self.assertTrue(body.startswith(sent))
+        longer = body[:len(sent) + 1]
+        from platform_api.apns import _payload
+        self.assertGreater(len(_payload(title, longer)), 4096)
+
+    def test_huge_title_is_error_without_request(self):
+        self.assertEqual(self.apns().send("ab" * 32, "production", "x" * 5000, "b", "c"), "error")
+        self.assertEqual(self.requests, [])
+
+    def test_lone_surrogate_does_not_raise(self):
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t\ud800", "b\udc00", "c"), "ok")
+
+    def test_from_env_rejects_garbage_and_wrong_curve(self):
+        env = {"APNS_KEY_ID": "K", "APNS_TEAM_ID": "T"}
+        bad = base64.b64encode(b"-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----\n").decode()
+        self.assertIsNone(Apns.from_env({**env, "APNS_KEY": bad}))
+        self.assertIsNone(Apns.from_env({**env, "APNS_KEY": base64.b64encode(b"hello").decode()}))
+        other = ec.generate_private_key(ec.SECP384R1()).private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption())
+        self.assertIsNone(Apns.from_env({**env, "APNS_KEY": base64.b64encode(other).decode()}))
+
+    def test_bad_key_send_returns_error(self):
+        a = self.apns(pem=b"not a key")
+        self.assertEqual(a.send("ab" * 32, "production", "t", "b", "c"), "error")
+        self.assertEqual(self.requests, [])
+
+    def test_403_drops_cached_jwt(self):
+        a = self.apns()
+        a.send("ab" * 32, "production", "t", "b", "c")
+        self.now += 1
+        self.status, self.reason = 403, "ExpiredProviderToken"
+        a.send("ab" * 32, "production", "t", "b", "c")
+        self.now += 1
+        self.status, self.reason = 200, None
+        a.send("ab" * 32, "production", "t", "b", "c")
+        auth = [r.headers["authorization"] for r in self.requests]
+        self.assertEqual(auth[0], auth[1])  # cached until the 403
+        self.assertNotEqual(auth[1], auth[2])
+
+    def test_backwards_clock_renews_jwt(self):
+        a = self.apns()
+        a.send("ab" * 32, "production", "t", "b", "c")
+        self.now -= 100
+        a.send("ab" * 32, "production", "t", "b", "c")
+        auth = [r.headers["authorization"] for r in self.requests]
+        self.assertNotEqual(auth[0], auth[1])
+
+    def test_log_has_status_reason_and_no_token(self):
+        token = "ab" * 32
+        a = self.apns()
+        self.status, self.reason = 400, "PayloadEmpty"
+        a.send(token, "production", "SECRET TITLE", "SECRET BODY", "c")
+        self.assertEqual(self.log.getvalue(), "apns 400 PayloadEmpty\n")
+        self.raise_error = True
+        a = self.apns()
+        a.send(token, "production", "SECRET TITLE", "SECRET BODY", "c")
+        self.assertEqual(self.log.getvalue(), "apns network ConnectError\n")
+        for text in (token, "SECRET"):
+            self.assertNotIn(text, self.log.getvalue())
 
 
 if __name__ == "__main__":
