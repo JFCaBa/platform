@@ -101,8 +101,9 @@ void main() {
         code == 200 ? '{"ok":true}' : code == 410 ? '{"error":"gone"}' : '{"error":"x"}', code);
   });
 
-  Future<PushFollower> make({SharedPreferences? store}) async {
-    final f = await PushFollower.create(client: client, prefs: store ?? prefs, push: push, clock: () => now);
+  Future<PushFollower> make({SharedPreferences? store, Duration postTimeout = followPostTimeout}) async {
+    final f = await PushFollower.create(
+        client: client, prefs: store ?? prefs, push: push, clock: () => now, postTimeout: postTimeout);
     await pumpEventQueue(); // let create's sync finish
     return f;
   }
@@ -462,5 +463,53 @@ void main() {
     final deletes = calls.where((c) => c.method == 'DELETE').map((c) => c.body['token']);
     expect(deletes, containsAll(['old', 'new']));
     expect(calls.last.method, 'DELETE');
+  });
+
+  test('POST timeout is above the server worst case and within nginx', () {
+    // Server: up to 5 s waiting for a poll slot + 8 s Darwin deadline; nginx proxy_read_timeout 20 s.
+    expect(followPostTimeout, const Duration(seconds: 18));
+  });
+
+  test('stop during a follow whose POST times out sends DELETE for that token', () async {
+    final f = await make(postTimeout: const Duration(milliseconds: 50));
+    postAnswers = [Completer<Object>()]; // never answers
+    final following = f.follow(train);
+    await pumpEventQueue();
+    final stopping = f.stop();
+    await following;
+    await stopping;
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+  });
+
+  test('a follow whose POST times out throws network and cleans up the attempted token', () async {
+    final f = await make(postTimeout: const Duration(milliseconds: 50));
+    postAnswers = [Completer<Object>()];
+    await expectLater(f.follow(train), throwsA(failed(FollowFailure.network)));
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+    await f.stop(); // already cleaned up: nothing sent again
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+  });
+
+  test('a follow whose POST fails on the network cleans up the attempted token', () async {
+    final f = await make();
+    postAnswers = [const SocketException('offline')];
+    await expectLater(f.follow(train), throwsA(failed(FollowFailure.network)));
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+  });
+
+  test('a definite non-200 answer leaves nothing to delete', () async {
+    for (final code in [400, 409, 410, 429, 502, 503]) {
+      calls.clear();
+      final f = await make();
+      postAnswers = [code];
+      await expectLater(f.follow(train), throwsA(isA<FollowFailed>()));
+      await f.stop();
+      expect(calls.map((c) => c.method), ['POST'], reason: '$code');
+    }
   });
 }

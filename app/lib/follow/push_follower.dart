@@ -14,9 +14,13 @@ import 'push_token.dart';
 const _key = 'push_follow';
 const _timeout = Duration(seconds: 10);
 
+/// POST /follow timeout: above the server's worst case (5 s waiting for a poll slot + 8 s Darwin
+/// deadline) and within nginx's proxy_read_timeout (20 s). DELETE keeps [_timeout].
+const followPostTimeout = Duration(seconds: 18);
+
 /// iOS: the server follows the train and sends push alerts; the app only registers and unregisters.
 class PushFollower extends ChangeNotifier implements Follower {
-  PushFollower._(this._client, this._prefs, this._push, this._baseUrl, this._clock) {
+  PushFollower._(this._client, this._prefs, this._push, this._baseUrl, this._clock, this._postTimeout) {
     _current = _saved()?.train;
   }
 
@@ -28,8 +32,9 @@ class PushFollower extends ChangeNotifier implements Follower {
     required PushToken push,
     String baseUrl = apiBaseUrl,
     DateTime Function() clock = DateTime.now,
+    @visibleForTesting Duration postTimeout = followPostTimeout,
   }) async {
-    final f = PushFollower._(client, prefs, push, baseUrl, clock);
+    final f = PushFollower._(client, prefs, push, baseUrl, clock, postTimeout);
     unawaited(f.sync());
     return f;
   }
@@ -39,6 +44,7 @@ class PushFollower extends ChangeNotifier implements Follower {
   final PushToken _push;
   final String _baseUrl;
   final DateTime Function() _clock;
+  final Duration _postTimeout;
 
   FollowedTrain? _current;
   Future<void> _queue = Future.value();
@@ -47,8 +53,9 @@ class PushFollower extends ChangeNotifier implements Follower {
   /// must not change the state.
   int _gen = 0;
 
-  /// What the server last accepted (a POST answered 200), even from a superseded operation, until
-  /// that token is deleted: so a stop or a later follow can always clean it up.
+  /// What the server last accepted (a POST answered 200) or may have accepted (a POST that timed
+  /// out or failed on the network), even from a superseded operation, until that token is
+  /// deleted: so a stop or a later follow can always clean it up.
   _Saved? _registered;
 
   @override
@@ -154,15 +161,18 @@ class PushFollower extends ChangeNotifier implements Follower {
     if (saved != null && saved.token == stray.token) await _clear();
   }
 
-  /// POST /follow; the HTTP status, or null on a network error.
+  /// POST /follow; the HTTP status, or null on a timeout or network error. Without a definite
+  /// answer the server may still have registered it, so it counts as registered; a definite
+  /// non-200 answer does not.
   Future<int?> _post(_Saved s) async {
     try {
       final r = await _client
           .post(Uri.parse('$_baseUrl/follow'), headers: _headers, body: jsonEncode(s.body()))
-          .timeout(_timeout);
+          .timeout(_postTimeout);
       if (r.statusCode == 200) _registered = s;
       return r.statusCode;
     } catch (_) {
+      _registered = s;
       return null;
     }
   }
