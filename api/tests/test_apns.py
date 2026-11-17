@@ -51,7 +51,7 @@ class ApnsTest(unittest.TestCase):
         )
 
     def test_request_shape(self):
-        result = self.apns().send("ab" * 32, "production", "08:12 to Cardiff Central", "Platform 5", "cid")
+        result = self.apns().send("ab" * 32, "production", "08:12 to Cardiff Central", "Platform 5")
         self.assertEqual(result, "ok")
         req = self.requests[0]
         self.assertEqual(str(req.url), "https://api.push.apple.com/3/device/" + "ab" * 32)
@@ -60,7 +60,7 @@ class ApnsTest(unittest.TestCase):
         self.assertEqual(h["apns-topic"], "com.jfcaba.platform")
         self.assertEqual(h["apns-push-type"], "alert")
         self.assertEqual(h["apns-priority"], "10")
-        self.assertEqual(h["apns-collapse-id"], "cid")
+        self.assertNotIn("apns-collapse-id", h)  # every alert stays on the lock screen
         self.assertEqual(h["apns-expiration"], str(int(self.now) + 600))
         scheme, token = h["authorization"].split(" ", 1)
         self.assertEqual(scheme, "bearer")
@@ -73,16 +73,16 @@ class ApnsTest(unittest.TestCase):
         }})
 
     def test_sandbox_host(self):
-        self.apns().send("cd" * 32, "sandbox", "t", "b", "c")
+        self.apns().send("cd" * 32, "sandbox", "t", "b")
         self.assertEqual(self.requests[0].url.host, "api.sandbox.push.apple.com")
 
     def test_jwt_reused_under_50_min_and_renewed_after(self):
         a = self.apns()
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         self.now += 49 * 60
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         self.now += 2 * 60
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         auth = [r.headers["authorization"] for r in self.requests]
         self.assertEqual(auth[0], auth[1])
         self.assertNotEqual(auth[1], auth[2])
@@ -90,24 +90,24 @@ class ApnsTest(unittest.TestCase):
     def test_410_is_gone(self):
         self.status = 410
         self.reason = "Unregistered"
-        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b", "c"), "gone")
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "gone")
 
     def test_400_bad_device_token_is_gone(self):
         self.status = 400
         for reason in ("BadDeviceToken", "DeviceTokenNotForTopic"):
             self.reason = reason
-            self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b", "c"), "gone")
+            self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "gone")
 
     def test_other_400_is_error(self):
         self.status = 400
         self.reason = "PayloadEmpty"
-        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b", "c"), "error")
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "error")
 
     def test_500_and_network_error_are_error(self):
         self.status = 500
-        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b", "c"), "error")
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "error")
         self.raise_error = True
-        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b", "c"), "error")
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "error")
 
     def test_from_env_missing_is_none(self):
         full = {
@@ -129,7 +129,7 @@ class ApnsTest(unittest.TestCase):
     def test_payload_over_4kb_truncates_body(self):
         title = "08:12 to Cardiff Central"
         body = "Delayed é\n" * 1000
-        self.assertEqual(self.apns().send("ab" * 32, "production", title, body, "c"), "ok")
+        self.assertEqual(self.apns().send("ab" * 32, "production", title, body), "ok")
         content = self.requests[0].content
         self.assertLessEqual(len(content), 4096)
         sent = json.loads(content)["aps"]["alert"]
@@ -140,7 +140,7 @@ class ApnsTest(unittest.TestCase):
     def test_payload_truncation_is_maximal(self):
         title = "08:12 to Cardiff Central"
         body = "Platform changed: 3 \u2192 5\n" * 500
-        self.apns().send("ab" * 32, "production", title, body, "c")
+        self.apns().send("ab" * 32, "production", title, body)
         content = self.requests[0].content
         sent = json.loads(content)["aps"]["alert"]["body"]
         self.assertLessEqual(len(content), 4096)
@@ -150,11 +150,11 @@ class ApnsTest(unittest.TestCase):
         self.assertGreater(len(_payload(title, longer)), 4096)
 
     def test_huge_title_is_error_without_request(self):
-        self.assertEqual(self.apns().send("ab" * 32, "production", "x" * 5000, "b", "c"), "error")
+        self.assertEqual(self.apns().send("ab" * 32, "production", "x" * 5000, "b"), "error")
         self.assertEqual(self.requests, [])
 
     def test_lone_surrogate_does_not_raise(self):
-        self.assertEqual(self.apns().send("ab" * 32, "production", "t\ud800", "b\udc00", "c"), "ok")
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t\ud800", "b\udc00"), "ok")
 
     def test_from_env_rejects_garbage_and_wrong_curve(self):
         env = {"APNS_KEY_ID": "K", "APNS_TEAM_ID": "T"}
@@ -168,27 +168,73 @@ class ApnsTest(unittest.TestCase):
 
     def test_bad_key_send_returns_error(self):
         a = self.apns(pem=b"not a key")
-        self.assertEqual(a.send("ab" * 32, "production", "t", "b", "c"), "error")
+        self.assertEqual(a.send("ab" * 32, "production", "t", "b"), "error")
         self.assertEqual(self.requests, [])
 
-    def test_403_drops_cached_jwt(self):
+    def test_403_expired_token_drops_cached_jwt(self):
         a = self.apns()
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         self.now += 1
         self.status, self.reason = 403, "ExpiredProviderToken"
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         self.now += 1
         self.status, self.reason = 200, None
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         auth = [r.headers["authorization"] for r in self.requests]
         self.assertEqual(auth[0], auth[1])  # cached until the 403
         self.assertNotEqual(auth[1], auth[2])
 
+    def test_other_403_keeps_cached_jwt(self):
+        a = self.apns()
+        a.send("ab" * 32, "production", "t", "b")
+        self.now += 1
+        self.status, self.reason = 403, "InvalidProviderToken"
+        a.send("ab" * 32, "production", "t", "b")
+        self.now += 1
+        self.status, self.reason = 200, None
+        a.send("ab" * 32, "production", "t", "b")
+        auth = [r.headers["authorization"] for r in self.requests]
+        self.assertEqual(auth[0], auth[1])
+        self.assertEqual(auth[1], auth[2])  # no token churn (TooManyProviderTokenUpdates)
+
+    def test_network_error_retries_once_then_ok(self):
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            if len(calls) == 1:
+                raise httpx.ConnectError("boom")
+            return httpx.Response(200)
+
+        a = Apns(self.pem, "K", "T", clock=self.clock, transport=httpx.MockTransport(handler),
+                 log=io.StringIO())
+        self.assertEqual(a.send("ab" * 32, "production", "t", "b"), "ok")
+        self.assertEqual(len(calls), 2)
+
+    def test_network_error_twice_is_error_after_two_requests(self):
+        self.raise_error = True
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "error")
+        self.assertEqual(len(self.requests), 2)
+
+    def test_http_500_is_not_retried(self):
+        self.status = 500
+        self.assertEqual(self.apns().send("ab" * 32, "production", "t", "b"), "error")
+        self.assertEqual(len(self.requests), 1)
+
+    def test_from_env_strips_whitespace(self):
+        env = {
+            "APNS_KEY": base64.b64encode(self.pem).decode() + "\n",
+            "APNS_KEY_ID": " KID123 \n", "APNS_TEAM_ID": "\tTEAM99 ",
+        }
+        a = Apns.from_env(env)
+        self.assertEqual((a._key_id, a._team_id, a._key_pem), ("KID123", "TEAM99", self.pem))
+        self.assertIsNone(Apns.from_env({**env, "APNS_KEY_ID": "  \n"}))
+
     def test_backwards_clock_renews_jwt(self):
         a = self.apns()
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         self.now -= 100
-        a.send("ab" * 32, "production", "t", "b", "c")
+        a.send("ab" * 32, "production", "t", "b")
         auth = [r.headers["authorization"] for r in self.requests]
         self.assertNotEqual(auth[0], auth[1])
 
@@ -196,11 +242,11 @@ class ApnsTest(unittest.TestCase):
         token = "ab" * 32
         a = self.apns()
         self.status, self.reason = 400, "PayloadEmpty"
-        a.send(token, "production", "SECRET TITLE", "SECRET BODY", "c")
+        a.send(token, "production", "SECRET TITLE", "SECRET BODY")
         self.assertEqual(self.log.getvalue(), "apns 400 PayloadEmpty\n")
         self.raise_error = True
         a = self.apns()
-        a.send(token, "production", "SECRET TITLE", "SECRET BODY", "c")
+        a.send(token, "production", "SECRET TITLE", "SECRET BODY")
         self.assertEqual(self.log.getvalue(), "apns network ConnectError\n")
         for text in (token, "SECRET"):
             self.assertNotIn(text, self.log.getvalue())

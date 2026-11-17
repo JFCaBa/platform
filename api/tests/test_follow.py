@@ -266,8 +266,8 @@ class Push:
         self.hook = hook
         self.sent: list[tuple] = []
 
-    def send(self, token, env, title, body, collapse_id):
-        self.sent.append((token, env, title, body, collapse_id))
+    def send(self, token, env, title, body):
+        self.sent.append((token, env, title, body))
         if self.hook:
             self.hook()
         return self.result
@@ -279,11 +279,6 @@ class RateLimited(Exception):
 
 class Upstream(Exception):
     status = 502
-
-
-def collapse(token=TOKEN, crs="CDF", std="08:12", dest="Cardiff Central"):
-    import hashlib
-    return hashlib.sha256((token + crs + std + dest).encode()).hexdigest()[:16]
 
 
 class PollerTest(unittest.TestCase):
@@ -309,7 +304,7 @@ class PollerTest(unittest.TestCase):
         self.boards.set("CDF", dep(platform="5", etd="On time"))
         self.poller.tick()
         self.assertEqual(self.push.sent, [(TOKEN, "production", "08:12 to Cardiff Central",
-                                           "Platform changed: 3 → 5", collapse())])
+                                           "Platform changed: 3 → 5")])
         self.assertEqual(self.only().last["platform"], "5")
 
     def test_two_changes_one_push_joined_by_newline(self):
@@ -318,10 +313,9 @@ class PollerTest(unittest.TestCase):
         self.poller.tick()
         self.assertEqual(len(self.push.sent), 1)
         self.assertEqual(self.push.sent[0][3], "Platform changed: 3 → 5\nNow expected 08:19")
-        self.assertEqual(self.push.sent[0][4], collapse())
         self.boards.set("CDF", dep(platform="6", etd="08:19"))
         self.poller.tick()
-        self.assertEqual(self.push.sent[1][4], collapse())
+        self.assertEqual(len(self.push.sent), 2)  # a later change is its own push, none replaced
 
     def test_no_alert_when_unchanged(self):
         self.follow()

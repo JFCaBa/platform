@@ -1,8 +1,10 @@
 """Platform API: GET /departures/{CRS} → next departures (Darwin, reshaped), GET /health,
 POST/DELETE /follow → push alerts (APNs) for one followed train per device.
 
-Privacy: requests are not logged; only board/stop Darwin failures (station code + reason).
-Follows live in memory only and nothing about them is logged.
+Privacy: requests are not logged. Logged: Darwin failures (station code + reason),
+`apns <status> <reason>` / `apns network <Class>`, `follow poller: <Class>`, `unhandled <Class>`,
+and one startup line `follow: on|off`. Never device tokens, trains or client addresses.
+Follows live in memory only.
 Load: at most `max_inflight` concurrent Darwin calls (more → 503); nginx caches 30 s
 per CRS in front of this.
 """
@@ -353,6 +355,8 @@ def main(env: dict | None = None) -> int:
     stations_url = env.get("STATIONS_URL", STATIONS_URL)
     push = Apns.from_env(env)  # None without APNs secrets: /follow answers 503
     follows = FollowStore() if push is not None else None
+    print("follow: on" if push is not None else "follow: off (APNS_* missing or invalid)",
+          file=sys.stderr)
     # Port fixed inside the container; PORT in .env only changes the host side (compose).
     httpd = make_server("0.0.0.0", 8510, darwin_url=env.get("DARWIN_URL", DARWIN_URL),
                         api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS),

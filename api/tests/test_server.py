@@ -309,7 +309,7 @@ class FakePush:
         self.sent = []
         self.result = result
 
-    def send(self, token, env, title, body, collapse_id):
+    def send(self, token, env, title, body):
         self.sent.append((token, env, title, body))
         return self.result
 
@@ -622,12 +622,15 @@ class StationsTest(unittest.TestCase):
         orig_make, orig_load = srv.make_server, srv.load_stations
         srv.make_server, srv.load_stations = fake_make, lambda url, fb: {"KGX"}
         try:
-            self.assertEqual(srv.main(env={"DARWIN_API_KEY": "k", "PORT": "9999"}), 0)
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(srv.main(env={"DARWIN_API_KEY": "k", "PORT": "9999"}), 0)
         finally:
             srv.make_server, srv.load_stations = orig_make, orig_load
         self.assertEqual((seen["host"], seen["port"]), ("0.0.0.0", 8510))
         self.assertEqual(seen["darwin_url"], srv.DARWIN_URL)
         self.assertEqual(seen["api_key"], "k")
+        self.assertIn("follow: off (APNS_* missing or invalid)\n", err.getvalue())
+        self.assertNotIn("follow: on", err.getvalue())
         self.assertIsNone(seen["push"])  # no APNs secrets: /follow answers 503, no poller
 
     def test_main_with_apns_starts_poller(self):
@@ -665,9 +668,13 @@ class StationsTest(unittest.TestCase):
         try:
             env = {"DARWIN_API_KEY": "k", "APNS_KEY": base64.b64encode(pem).decode(),
                    "APNS_KEY_ID": "KID", "APNS_TEAM_ID": "TEAM"}
-            self.assertEqual(srv.main(env=env), 0)
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(srv.main(env=env), 0)
         finally:
             srv.make_server, srv.load_stations, srv.Poller = orig
+        self.assertIn("follow: on\n", err.getvalue())
+        self.assertNotIn("KID", err.getvalue())
+        self.assertNotIn("TEAM", err.getvalue())
         self.assertTrue(ran.wait(5))
         self.assertIsNotNone(seen["push"])
         self.assertIsInstance(seen["follows"], FollowStore)

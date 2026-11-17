@@ -68,9 +68,9 @@ class Apns:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Optional["Apns"]:
-        key_b64 = env.get("APNS_KEY") or ""
-        key_id = env.get("APNS_KEY_ID") or ""
-        team_id = env.get("APNS_TEAM_ID") or ""
+        key_b64 = (env.get("APNS_KEY") or "").strip()
+        key_id = (env.get("APNS_KEY_ID") or "").strip()
+        team_id = (env.get("APNS_TEAM_ID") or "").strip()
         if not (key_b64 and key_id and team_id):
             return None
         try:
@@ -105,8 +105,10 @@ class Apns:
         except Exception:
             pass
 
-    def send(self, token: str, env: str, title: str, body: str, collapse_id: str) -> str:
-        """Returns "ok", "gone" (token no longer valid) or "error". Never raises."""
+    def send(self, token: str, env: str, title: str, body: str) -> str:
+        """Returns "ok", "gone" (token no longer valid) or "error". Never raises.
+        No apns-collapse-id: every alert stays on the lock screen. One immediate retry on a
+        network exception only, never on an HTTP status."""
         try:
             payload = build_payload(title, body)
             if payload is None:
@@ -118,12 +120,14 @@ class Apns:
                 "apns-topic": self._topic,
                 "apns-push-type": "alert",
                 "apns-priority": "10",
-                "apns-collapse-id": collapse_id,
                 "apns-expiration": str(int(self._clock()) + EXPIRATION_SECONDS),
                 "content-type": "application/json",
             }
-            r = self._client.post(f"https://{host}/3/device/{token}",
-                                  content=payload, headers=headers)
+            url = f"https://{host}/3/device/{token}"
+            try:
+                r = self._client.post(url, content=payload, headers=headers)
+            except httpx.TransportError:
+                r = self._client.post(url, content=payload, headers=headers)
         except Exception as e:
             self._note(f"apns network {type(e).__name__}")
             return "error"
@@ -135,8 +139,8 @@ class Apns:
         except Exception:
             pass
         self._note(f"apns {r.status_code} {reason}")
-        if r.status_code == 403:
-            self._drop_token()
+        if r.status_code == 403 and reason == "ExpiredProviderToken":
+            self._drop_token()  # other 403s keep it: renewing too often is TooManyProviderTokenUpdates
         if r.status_code == 410:
             return "gone"
         if r.status_code == 400 and reason in GONE_REASONS:

@@ -30,7 +30,9 @@ sudo nginx -t && sudo systemctl reload nginx
 ```sh
 cd /opt/platform/repo && sudo git pull --ff-only
 cd api && sudo docker compose up -d --build                     # API changes
-# API logs: only Darwin failures (station code + reason), never requests or client addresses
+# API logs: Darwin failures (station code + reason), `apns <status> <reason>` / `apns network <Class>`,
+# `follow poller: <Class>`, `unhandled <Class>` and a startup line `follow: on|off`.
+# Never tokens, trains, requests or client addresses.
 sudo docker compose logs --tail 20
 sudo cp ../deploy/nginx/whatplatform.uk.conf /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx   # nginx changes
 ```

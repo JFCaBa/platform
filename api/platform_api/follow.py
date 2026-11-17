@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import sys
 import threading
 import time
@@ -193,11 +192,6 @@ class FollowStore:
             return len(self._follows)
 
 
-def collapse_id(token: str, train: dict) -> str:
-    key = f"{token}{train.get('crs')}{train.get('std')}{train.get('destination')}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-
-
 class Poller:
     """Polls each followed station's board once per tick and pushes what changed. Follows are read
     as copies, boards fetched and pushes sent outside the store lock, and results written back by
@@ -258,7 +252,7 @@ class Poller:
         if texts:
             title = f"{f.train.get('std')} to {f.train.get('destination')}"
             try:
-                result = self._push.send(f.token, f.env, title, "\n".join(texts), collapse_id(f.token, f.train))
+                result = self._push.send(f.token, f.env, title, "\n".join(texts))
             except Exception as e:
                 self._note(e)
                 result = "error"
