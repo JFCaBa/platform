@@ -64,3 +64,13 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
   se reutiliza la de Matchday (Key ID SAZJXCZQW3, fichero en /home/ubuntu/matchday-secrets/apns-key.p8 del mismo VPS). Revocarla rompería Matchday y What Platform a la vez.
   APNS_* añadidos a /opt/platform/.env (copia previa .env.bak-202611172048, 600 root). Log: `follow: on`. POST {} → 400, tren inexistente → 410, DELETE → 204.
 - 17-11-2026: prueba real en iPhone 11 (iOS 27.0.1, build release firmada para desarrollo → sandbox): seguido el 21:18 KGX→Ely desde España; a las 21:12 UK le asignan andén 0 y llega el aviso "21:18 to Ely / Platform 0" con la app cerrada. ✅
+
+## Próxima versión: What Platform iOS 1.2.0 (8) — pendiente (esperando revisión de la 1.1.0)
+Código en main (1.2.0+8), servidor desplegado con `follow: on`, prueba real OK. Cuando Apple apruebe la 1.1.0:
+1. Archivar 1.2.0 (8) y comprobar que el IPA exportado lleva `aps-environment` = production (el fichero Runner.entitlements dice development; Xcode lo cambia al exportar).
+2. Subir a App Store Connect (`xcodebuild -exportArchive`, método app-store-connect) y asignar el build a la versión 1.2.0; probar antes por TestFlight (entorno production).
+3. App Privacy: pasar de "Data Not Collected" a Identifiers → Device ID · Not Linked to You · App Functionality.
+4. Ficha: descripción y novedades en-GB con "follow a train on iPhone: alerts for platform, time and cancellation changes"; notas del revisor (seguir un tren, permiso de notificaciones, cómo probarlo).
+5. Captura nueva opcional con la campanita en una fila.
+6. Enviar a revisión: lo pulsa el usuario.
+Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de Play. Pruebas reales pendientes de "Now expected …" y "Cancelled" (Paulo).
