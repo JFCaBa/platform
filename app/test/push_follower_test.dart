@@ -512,4 +512,35 @@ void main() {
       expect(calls.map((c) => c.method), ['POST'], reason: '$code');
     }
   });
+
+  for (final failure in <String, Object Function()>{
+    'times out': () => Completer<Object>(),
+    'fails on the network': () => const SocketException('offline'),
+  }.entries) {
+    test('saved A, follow B ${failure.key}: A stays, a later stop deletes the token', () async {
+      final f = await make(postTimeout: const Duration(milliseconds: 50));
+      await f.follow(train);
+      postAnswers = [failure.value()];
+      await expectLater(f.follow(other), throwsA(failed(FollowFailure.network)));
+      expect(f.current, train);
+      expect(saved()?['train'], train.toJson());
+      expect(calls.map((c) => c.method), ['POST', 'POST']); // no cleanup DELETE
+      await f.stop();
+      expect(calls.map((c) => c.method), ['POST', 'POST', 'DELETE']);
+      expect(calls.last.body, {'token': 'abc123'});
+    });
+  }
+
+  test('a DELETE that fails is retried by the next stop', () async {
+    final f = await make();
+    await f.follow(train);
+    deleteFails = true;
+    await f.stop();
+    deleteFails = false;
+    await f.stop();
+    expect(calls.map((c) => c.method), ['POST', 'DELETE', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+    await f.stop(); // answered 204: nothing left to delete
+    expect(calls.map((c) => c.method), ['POST', 'DELETE', 'DELETE']);
+  });
 }

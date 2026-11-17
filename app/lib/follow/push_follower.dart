@@ -151,14 +151,15 @@ class PushFollower extends ChangeNotifier implements Follower {
   @override
   Future<void> openSettings() => _push.openSettings();
 
-  /// After a failed follow: the server may still hold a registration from a superseded follow that
-  /// no saved state accounts for. Delete it, and any saved follow it replaced on the server.
+  /// After a failed follow: the server may still hold a registration (from a superseded follow, or
+  /// a POST without an answer) that no saved state accounts for. Delete it when its token differs
+  /// from the saved follow's. With the same token the saved follow stays: deleting would end it on
+  /// the server too (and offline the DELETE may not get there). `_registered` keeps the token, so a
+  /// later stop() still deletes it, and the next sync() re-posts the saved follow.
   Future<void> _dropStray() async {
     final stray = _registered;
-    final saved = _saved();
-    if (stray == null || stray == saved) return;
+    if (stray == null || stray.token == _saved()?.token) return;
     await _delete(stray.token);
-    if (saved != null && saved.token == stray.token) await _clear();
   }
 
   /// POST /follow; the HTTP status, or null on a timeout or network error. Without a definite
@@ -177,13 +178,14 @@ class PushFollower extends ChangeNotifier implements Follower {
     }
   }
 
-  /// Best-effort DELETE /follow: the server also ends follows on its own after 3 h.
+  /// Best-effort DELETE /follow: the server also ends follows on its own after 3 h. `_registered`
+  /// is forgotten only once the server answered 2xx, so a failed DELETE is retried by a later stop.
   Future<void> _delete(String token) async {
-    if (_registered?.token == token) _registered = null;
     try {
-      await _client
+      final r = await _client
           .delete(Uri.parse('$_baseUrl/follow'), headers: _headers, body: jsonEncode({'token': token}))
           .timeout(_timeout);
+      if (r.statusCode >= 200 && r.statusCode < 300 && _registered?.token == token) _registered = null;
     } catch (_) {}
   }
 
