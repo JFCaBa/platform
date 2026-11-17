@@ -59,11 +59,26 @@ class FollowStoreTest(unittest.TestCase):
         s = FollowStore()
         self.assertEqual(s.upsert("aa", "production", train(), {"platform": "1"}, 900.0), "ok")
         gen = s.for_station("CDF")[0].gen
-        self.assertEqual(s.upsert("aa", "sandbox", train(), {"platform": "9"}, 960.0), "ok")
+        self.assertEqual(s.upsert("aa", "production", train(), {"platform": "9"}, 960.0), "ok")
         (f,) = s.for_station("CDF")
         self.assertEqual(f.last, {"platform": "1"})
         self.assertEqual(f.started, 900.0)
         self.assertEqual(f.gen, gen)
+        self.assertEqual(len(s), 1)
+
+    def test_upsert_same_train_new_env_keeps_state_with_new_gen(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {"platform": "1"}, 900.0)
+        gen = s.for_station("CDF")[0].gen
+        s.update("aa", gen, missing=1, cancelled_at=950.0)
+        self.assertEqual(s.upsert("aa", "sandbox", train(), {"platform": "9"}, 960.0), "ok")
+        (f,) = s.for_station("CDF")
+        self.assertEqual((f.env, f.last, f.started, f.missing, f.cancelled_at),
+                         ("sandbox", {"platform": "1"}, 900.0, 1, 950.0))
+        self.assertNotEqual(f.gen, gen)
+        # a poller send to the old env host can no longer touch or remove it
+        self.assertFalse(s.update("aa", gen, missing=0))
+        s.remove("aa", gen)
         self.assertEqual(len(s), 1)
 
     def test_new_train_replaces(self):
@@ -225,6 +240,16 @@ class FollowStoreTest(unittest.TestCase):
         s.upsert("aa", "production", train(), {}, 1.0)
         s.remove("aa")
         self.assertEqual(len(s), 0)
+
+    def test_poller_remove_does_not_bump_epoch(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {}, 1.0)
+        gen = s.for_station("CDF")[0].gen
+        e = s.epoch("aa")  # a POST reads the epoch, then the poller cleans the follow up
+        s.remove("aa", gen)
+        self.assertEqual(len(s), 0)
+        self.assertEqual(s.epoch("aa"), e)
+        self.assertEqual(s.upsert("aa", "production", train(std="09:00"), {}, 2.0, expect_epoch=e), "ok")
 
 
 TOKEN = "ab" * 32
@@ -550,6 +575,46 @@ class PollerTest(unittest.TestCase):
         self.assertEqual(len(self.store), 2)
         self.assertEqual(log.getvalue(), "follow poller: AttributeError\n")
         self.assertNotIn(TOKEN, log.getvalue())
+
+    def test_follow_posted_during_fetch_waits_for_next_tick(self):
+        # The POST read a newer board (platform 5) than the one being fetched (platform 3).
+        self.follow(TOKEN)
+        old_fetch = self.boards.__call__
+
+        def fetch(crs):
+            self.follow(TOKEN2, baseline=dep(platform="5", etd="On time"))
+            return old_fetch(crs)
+
+        from platform_api.follow import Poller
+        p = Poller(self.store, fetch, self.push, clock=self.clock)
+        self.boards.set("CDF", dep(platform="3", etd="On time"))
+        p.tick()
+        self.assertEqual(self.push.sent, [])
+        f = next(f for f in self.store.for_station("CDF") if f.token == TOKEN2)
+        self.assertEqual(f.last["platform"], "5")
+
+    def test_run_keeps_cadence_when_tick_is_slow(self):
+        from platform_api.follow import Poller
+        waits = []
+
+        class FakeStop:
+            def is_set(self):
+                return len(waits) >= 3
+
+            def wait(self, t):
+                waits.append(t)
+                clock.t += t
+
+        clock = Clock()
+        p = Poller(self.store, self.boards, self.push, clock=clock)
+        durations = iter([12.0, 0.0, 45.0])
+
+        def slow_tick():
+            clock.t += next(durations)
+
+        p.tick = slow_tick
+        p.run(FakeStop(), every=30.0)
+        self.assertEqual(waits, [18.0, 30.0, 0.0])
 
     def test_run_survives_tick_errors_and_stops(self):
         import threading

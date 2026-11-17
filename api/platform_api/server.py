@@ -166,7 +166,8 @@ def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, 
 def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations: Collection[str],
                 attribution: str, service_url: str | None = None, service_key: str | None = None, deadline_s: float = 8.0, max_inflight: int = 8,
                 log: TextIO = sys.stderr, follows: FollowStore | None = None, push=None,
-                follow_wait_s: float = 5.0, clock=time.time) -> ThreadingHTTPServer:
+                follow_wait_s: float = 5.0, poll_wait_s: float = 10.0,
+                clock=time.time) -> ThreadingHTTPServer:
     slots = threading.BoundedSemaphore(max_inflight)
     # Stop lookups have their own, smaller pool: they must never leave the boards without a slot.
     service_slots = threading.BoundedSemaphore(max(1, max_inflight // 2))
@@ -174,9 +175,10 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
     poll_slots = threading.BoundedSemaphore(2)
 
     def fetch_board(crs: str, wait: float | None = None) -> dict:
-        """One board reading for /follow and the poller. Blocks for a poll slot (up to `wait`
-        seconds when given, else Busy). Raises Upstream or a shape error; never logs."""
-        if not (poll_slots.acquire() if wait is None else poll_slots.acquire(timeout=wait)):
+        """One board reading for /follow and the poller. Waits for a poll slot up to `wait`
+        seconds (the poller's `poll_wait_s` when not given), else Busy: the poller then skips
+        that station for this tick. Raises Upstream or a shape error; never logs."""
+        if not poll_slots.acquire(timeout=poll_wait_s if wait is None else wait):
             raise Busy()
         try:
             raw = fetch_darwin(f"{darwin_url}/{crs}{QUERY}", api_key, deadline_s)

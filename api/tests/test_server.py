@@ -513,6 +513,34 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(self.darwin.requests, 0)
         self.assertEqual(self.request("POST", self.body(), api=api)[0], 200)
 
+    def test_poller_skips_station_when_poll_slots_stay_full(self):
+        store = FollowStore()
+        api = self.serve(follows=store, push=self.push, poll_wait_s=0.3)
+        self.assertEqual(self.request("POST", self.body(), api=api)[0], 200)  # KGX
+        store.upsert("cd" * 32, "sandbox", {"crs": "CLJ", "std": "09:00", "destination": "Brighton"},
+                     {}, self.now)  # CLJ sorts first
+        self.darwin.board = kgx_with("10740404KNGX____", etd="14:40", platform="4")
+        requests = self.darwin.requests
+        self.assertTrue(api.poll_slots.acquire(blocking=False))
+        self.assertTrue(api.poll_slots.acquire(blocking=False))
+        threading.Timer(0.45, api.poll_slots.release).start()  # frees one slot after CLJ gave up
+        try:
+            t0 = time.monotonic()
+            Poller(store, api.fetch_board, self.push, clock=lambda: self.now, log=self.log).tick()
+            elapsed = time.monotonic() - t0
+        finally:
+            api.poll_slots.release()
+        self.assertGreaterEqual(elapsed, 0.3)
+        self.assertLess(elapsed, 5)
+        self.assertEqual(self.darwin.requests, requests + 1)  # KGX only
+        self.assertEqual([s[0] for s in self.push.sent], [TOKEN])
+        self.assertEqual(len(store), 2)
+        self.assertEqual(self.log.getvalue(), "")
+
+    def test_poller_poll_wait_defaults_to_ten_seconds(self):
+        import inspect
+        self.assertEqual(inspect.signature(srv.make_server).parameters["poll_wait_s"].default, 10.0)
+
     def test_follow_caps_503(self):
         api = self.serve(follows=FollowStore(max_follows=1), push=self.push)
         self.assertEqual(self.request("POST", self.body(), api=api)[0], 200)
@@ -549,7 +577,8 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(self.darwin.requests, 2)  # normal path: board read again
         (f,) = self.store.for_station("KGX")
         self.assertEqual(f.env, "production")
-        self.assertEqual((f.started, f.last, f.gen), (before.started, before.last, before.gen))
+        self.assertEqual((f.started, f.last), (before.started, before.last))
+        self.assertNotEqual(f.gen, before.gen)  # a send in flight to the old env can't touch it
 
     def raw(self, data: bytes, reset=False) -> bytes:
         sock = socket.create_connection(("127.0.0.1", self.api.server_address[1]), timeout=10)

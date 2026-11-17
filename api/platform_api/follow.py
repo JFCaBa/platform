@@ -87,10 +87,12 @@ class Follow:
 class FollowStore:
     """Follows kept in memory only, keyed by device token. Thread-safe. Every new or replaced
     follow gets a fresh generation so the poller can tell when it was changed under it.
-    A same-train upsert refreshes `env` without bumping `gen`.
+    A same-train upsert keeps the follow's state; it gets a new `gen` only when `env` changes,
+    so a send already in flight to the old env's host can't update or remove it.
 
-    Each token also has an epoch, bumped by every upsert and remove of that token, so a POST
-    that read the board meanwhile can tell a DELETE (or another POST) happened and back off."""
+    Each token also has an epoch, bumped by every upsert and by user removals (DELETE, no gen),
+    so a POST that read the board meanwhile can tell a DELETE (or another POST) happened and back
+    off. Poller removals don't bump it: a POST racing a poller cleanup is not a conflict."""
 
     MAX_EPOCHS = 10_000
 
@@ -133,7 +135,10 @@ class FollowStore:
                 return "stale"
             cur = self._follows.get(token)
             if cur is not None and _same_train(cur.train, train):
-                cur.env = env
+                if cur.env != env:
+                    self._gen += 1
+                    cur.gen = self._gen
+                    cur.env = env
                 self._bump(token)
                 return "ok"
             if cur is None and len(self._follows) >= self._max_follows:
@@ -175,8 +180,7 @@ class FollowStore:
             cur = self._follows.get(token)
             if cur is not None and (gen is None or cur.gen == gen):
                 del self._follows[token]
-                self._bump(token)
-            elif gen is None:  # a DELETE wins over a POST in flight even if nothing is stored yet
+            if gen is None:  # a DELETE wins over a POST in flight even if nothing is stored yet
                 self._bump(token)
 
     def stations(self) -> set[str]:
@@ -212,6 +216,9 @@ class Poller:
         if now < self._paused_until:
             return
         for crs in sorted(self._store.stations()):
+            # Copies taken before the fetch: a follow POSTed meanwhile has a baseline newer than
+            # this board, so it waits for the next tick.
+            follows = self._store.for_station(crs)
             try:
                 board = self._fetch(crs)
             except Exception as e:  # Darwin/network errors are silent; follows kept as they are
@@ -219,7 +226,7 @@ class Poller:
                     self._paused_until = now + RATE_LIMIT_PAUSE
                     return
                 continue
-            for f in self._store.for_station(crs):
+            for f in follows:
                 try:
                     self._check(f, board, now)
                 except Exception as e:  # one bad follow or service entry never stops the tick
@@ -233,8 +240,8 @@ class Poller:
                     self._store.remove(f.token, f.gen)
 
     def _check(self, f: Follow, board: dict, now: float) -> None:
-        # The copies were taken before earlier sends at this station; skip a follow deleted or
-        # replaced since then.
+        # The copies were taken before the fetch and earlier sends at this station; skip a follow
+        # deleted or replaced since then.
         if not self._store.is_current(f.token, f.gen):
             return
         d = find_followed(board, f.train)
@@ -264,11 +271,13 @@ class Poller:
 
     def run(self, stop: threading.Event, every: float = 30.0) -> None:
         while not stop.is_set():
+            began = self._clock()
             try:
                 self.tick()
             except Exception as e:  # keep the thread alive
                 self._note(e)
-            stop.wait(every)
+            # Ticks start ~`every` apart even when one is slow (clamped against clock jumps).
+            stop.wait(max(0.0, min(every, every - (self._clock() - began))))
 
     def _note(self, e: BaseException) -> None:
         """Logs the exception type only: messages may carry tokens."""
