@@ -16,3 +16,4 @@ key.properties
 .superpowers/
 .DS_Store
 _site/
+api/.venv/
