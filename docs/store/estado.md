@@ -41,3 +41,16 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 - Ficha completa (textos, icono, gráfico, 4 capturas; categoría Travel & Local), contenido de la app y declaraciones hechas (PEGI 3 / ESRB E, sin datos recogidos, sin advertising ID, público 18+).
 - **Enviada a revisión el 17-11-2026.** Publicación gestionada desactivada: al aprobarse, la prueba se activa sola.
 - Después: enlace de participación a los probadores; 14 días con ≥ 12 inscritos; luego pedir acceso a producción.
+
+## App Store 1.1.0 (17-11-2026)
+- Versión renombrada 1.0 → 1.1.0; build 7 (1.1.0) asignado (paradas; seguir trenes oculto en iOS). Grupo TestFlight "internal".
+- Ficha: descripción sin el seguimiento Android, keywords, subtítulo, soporte/privacidad https://whatplatform.uk/,
+  copyright "2026 What Platform", 6 capturas 6.3" (incluye `06-stops.png`), notas del revisor (`review-notes-en.md`),
+  sin login. Categoría Travel + Navigation. Content rights: sí, con derechos. Edad 4+. App Privacy: Data Not Collected.
+  Gratis, todos los países.
+- Política de privacidad nueva publicada (git pull en el VPS).
+- Pendiente (usuario): contacto del revisor, "Add for Review" y envío.
+
+## Play 1.1.0 (7)
+- Borrador en Alpha con notas en-GB y declaración FGS (dataSync, Network processing → Other, vídeo
+  https://www.youtube.com/watch?v=CzQffbLA2To). Se envía cuando Google apruebe la versión 4.
