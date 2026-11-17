@@ -35,3 +35,8 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
   Personal Play account → 14-day closed test with 12+ testers.
 - App Store Connect / Play Console entries, following `tren/docs/store/estado.md`. No "Submit for review"
   without explicit confirmation.
+
+## Play (17-11-2026)
+- Prueba cerrada "Alpha": Reino Unido, lista "Beta testers", feedback https://whatplatform.uk/. Borrador de versión con el AAB 4 (1.0.0) y notas en en-GB.
+- Hecho: política de privacidad, acceso (sin restricciones), anuncios (no), público objetivo (18+), textos de la ficha (borrador).
+- Pendiente (usuario): icono, gráfico destacado y capturas; categoría y contacto; clasificación de contenido (IARC); seguridad de los datos; declaraciones (gobierno, finanzas, salud). Luego enviar a revisión.
