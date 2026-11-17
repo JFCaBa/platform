@@ -22,6 +22,12 @@ Free. No ads, no account, no tracking. Your location stays on your phone.
 
 Train times from National Rail. Station locations from NaPTAN (Department for Transport, OGL).
 
+## App Store (iOS)
+
+Same description **without** the "Follow a train (Android)" bullet: following is Android-only for now,
+and the App Store rejects mentions of other platforms (2.3.10). First iOS release ships as 1.1.0, so
+there is no "What's new" text.
+
 ## What's new in 1.1 (release notes, 500 chars)
 
 Tap a train to see its stops, with live expected times.
