@@ -350,6 +350,67 @@ void main() {
       expect(bell, findsNothing);
     });
 
+    testWidgets('permission denied offers Settings', (tester) async {
+      final f = FakeFollower(granted: false);
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1)); // snackbar slid in
+      await tester.tap(find.text('Settings'));
+      await tester.pump();
+      expect(f.settingsOpened, 1);
+    });
+
+    testWidgets('no push token also offers Settings', (tester) async {
+      final f = FakeFollower()..failure = FollowFailed('notifications');
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(find.text('Allow notifications to follow a train'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
+    });
+
+    testWidgets('network failure has no Settings action', (tester) async {
+      final f = FakeFollower()..failure = FollowFailed('network');
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(find.text('Settings'), findsNothing);
+    });
+
+    testWidgets('gone shows "That train has left"', (tester) async {
+      final f = FakeFollower()..failure = FollowFailed('gone');
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(f.current, isNull);
+      expect(find.text('That train has left'), findsOneWidget);
+      expect(bell, findsNothing);
+    });
+
+    testWidgets('network failure says so', (tester) async {
+      final f = FakeFollower()..failure = FollowFailed('network');
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(find.text("Couldn't follow: check your connection"), findsOneWidget);
+    });
+
+    testWidgets('Undo that fails to re-follow shows the reason', (tester) async {
+      const york = FollowedTrain(crs: 'KGX', std: '09:40', destination: 'York');
+      final f = FakeFollower()..current = york;
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      f.failure = FollowFailed('gone');
+      await tester.tap(find.text('Undo'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1)); // the Undo snackbar slid out, the reason in
+      expect(tester.takeException(), isNull);
+      expect(find.text('That train has left'), findsOneWidget);
+    });
+
     testWidgets('bell only on the followed station', (tester) async {
       final f = FakeFollower()..current = const FollowedTrain(crs: 'CBG', std: '09:30', destination: 'Cambridge');
       await pump(tester, follower: f);

@@ -1,0 +1,303 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:platform_app/config.dart';
+import 'package:platform_app/follow/follow_logic.dart';
+import 'package:platform_app/follow/follower.dart';
+import 'package:platform_app/follow/push_follower.dart';
+import 'package:platform_app/follow/push_token.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class FakePushToken implements PushToken {
+  bool granted = true;
+  String? current = 'abc123';
+  String env = 'sandbox';
+
+  @override
+  Future<bool> requestPermission() async => granted;
+  @override
+  Future<String?> token() async => current;
+  @override
+  Future<String> environment() async => env;
+
+  int settingsOpened = 0;
+  @override
+  Future<void> openSettings() async => settingsOpened++;
+}
+
+class Call {
+  Call(this.method, this.body);
+  final String method;
+  final Map<String, dynamic> body;
+}
+
+void main() {
+  const train = FollowedTrain(crs: 'KGX', std: '09:30', destination: 'Cambridge', serviceId: 'S30');
+  const other = FollowedTrain(crs: 'KGX', std: '09:40', destination: 'York');
+  late DateTime now;
+  late FakePushToken push;
+  late List<Call> calls;
+  late List<http.Request> requests;
+  // Answers for POSTs, in order; when empty, 200. An int is a status, a Completer delays the answer.
+  late List<Object> postAnswers;
+  late bool deleteFails;
+  late SharedPreferences prefs;
+
+  setUp(() async {
+    now = DateTime.utc(2026, 11, 17, 9, 0);
+    push = FakePushToken();
+    calls = [];
+    requests = [];
+    postAnswers = [];
+    deleteFails = false;
+    SharedPreferences.setMockInitialValues({});
+    prefs = await SharedPreferences.getInstance();
+  });
+
+  late final client = MockClient((req) async {
+    requests.add(req);
+    calls.add(Call(req.method, jsonDecode(req.body) as Map<String, dynamic>));
+    if (req.method == 'DELETE') {
+      if (deleteFails) throw const SocketException('offline');
+      return http.Response('', 204);
+    }
+    Object a = postAnswers.isEmpty ? 200 : postAnswers.removeAt(0);
+    if (a is Completer<Object>) a = await a.future;
+    if (a is Exception) throw a;
+    final code = a as int;
+    return http.Response(
+        code == 200 ? '{"ok":true}' : code == 410 ? '{"error":"gone"}' : '{"error":"x"}', code);
+  });
+
+  Future<PushFollower> make() async {
+    final f = await PushFollower.create(client: client, prefs: prefs, push: push, clock: () => now);
+    await pumpEventQueue(); // let create's sync finish
+    return f;
+  }
+
+  Map<String, dynamic>? saved() {
+    final s = prefs.getString('push_follow');
+    return s == null ? null : jsonDecode(s) as Map<String, dynamic>;
+  }
+
+  void save(FollowedTrain t, DateTime startedAt, {String token = 'abc123', String env = 'sandbox'}) =>
+      prefs.setString('push_follow',
+          jsonEncode({'train': t.toJson(), 'startedAt': startedAt.millisecondsSinceEpoch, 'token': token, 'env': env}));
+
+  test('follow posts token env and train', () async {
+    final f = await make();
+    var notified = 0;
+    f.addListener(() => notified++);
+    expect(await f.follow(train), isTrue);
+    expect(calls.single.method, 'POST');
+    expect(calls.single.body, {
+      'token': 'abc123',
+      'env': 'sandbox',
+      'crs': 'KGX',
+      'std': '09:30',
+      'destination': 'Cambridge',
+      'serviceId': 'S30',
+      'startedAt': now.millisecondsSinceEpoch,
+    });
+    final r = requests.single;
+    expect(r.url.toString(), '$apiBaseUrl/follow');
+    expect(r.headers['User-Agent'], userAgent);
+    expect(r.headers['Content-Type'], startsWith('application/json'));
+    expect(f.current, train);
+    expect(notified, 1);
+    expect(saved(), {
+      'train': train.toJson(),
+      'startedAt': now.millisecondsSinceEpoch,
+      'token': 'abc123',
+      'env': 'sandbox',
+    });
+  });
+
+  test('follow omits a null serviceId', () async {
+    final f = await make();
+    await f.follow(other);
+    expect(calls.single.body.containsKey('serviceId'), isFalse);
+  });
+
+  test('permission denied follows nothing', () async {
+    push.granted = false;
+    final f = await make();
+    expect(await f.follow(train), isFalse);
+    expect(calls, isEmpty);
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+  });
+
+  test('openSettings goes through the push channel', () async {
+    final f = await make();
+    await f.openSettings();
+    expect(push.settingsOpened, 1);
+  });
+
+  test('no token throws notifications', () async {
+    push.current = null;
+    final f = await make();
+    await expectLater(f.follow(train), throwsA(isA<FollowFailed>().having((e) => e.reason, 'reason', 'notifications')));
+    expect(calls, isEmpty);
+    expect(f.current, isNull);
+  });
+
+  test('410 throws gone and saves nothing', () async {
+    postAnswers = [410];
+    final f = await make();
+    await expectLater(f.follow(train), throwsA(isA<FollowFailed>().having((e) => e.reason, 'reason', 'gone')));
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+  });
+
+  test('other errors throw network', () async {
+    postAnswers = [409, 503, const SocketException('offline')];
+    final f = await make();
+    for (var i = 0; i < 3; i++) {
+      await expectLater(f.follow(train), throwsA(isA<FollowFailed>().having((e) => e.reason, 'reason', 'network')));
+    }
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+  });
+
+  test('stop clears even if DELETE fails', () async {
+    final f = await make();
+    await f.follow(train);
+    deleteFails = true;
+    var notified = 0;
+    f.addListener(() => notified++);
+    await f.stop();
+    expect(f.current, isNull);
+    expect(notified, 1);
+    expect(saved(), isNull);
+    expect(calls.last.method, 'DELETE');
+    expect(calls.last.body, {'token': 'abc123'});
+  });
+
+  test('sync re-posts within 3 h and keeps on 200', () async {
+    final f = await make();
+    await f.follow(train);
+    now = now.add(const Duration(hours: 2, minutes: 59));
+    await f.sync();
+    expect(calls.map((c) => c.method), ['POST', 'POST']);
+    expect(f.current, train);
+    expect(saved(), isNotNull);
+  });
+
+  test('sync clears on 410', () async {
+    final f = await make();
+    await f.follow(train);
+    postAnswers = [410];
+    var notified = 0;
+    f.addListener(() => notified++);
+    await f.sync();
+    expect(f.current, isNull);
+    expect(notified, 1);
+    expect(saved(), isNull);
+  });
+
+  test('sync clears after 3 h and sends DELETE', () async {
+    final f = await make();
+    await f.follow(train);
+    now = now.add(const Duration(hours: 3));
+    await f.sync();
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+  });
+
+  test('sync keeps on network error', () async {
+    final f = await make();
+    await f.follow(train);
+    postAnswers = [const SocketException('offline'), 503, 429];
+    for (var i = 0; i < 3; i++) {
+      await f.sync();
+    }
+    expect(f.current, train);
+    expect(saved(), isNotNull);
+  });
+
+  test('sync posts original startedAt', () async {
+    final started = now;
+    final f = await make();
+    await f.follow(train);
+    now = now.add(const Duration(hours: 1));
+    await f.sync();
+    expect(calls.last.body['startedAt'], started.millisecondsSinceEpoch);
+  });
+
+  test('stop during pending sync wins', () async {
+    final f = await make();
+    await f.follow(train);
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final syncing = f.sync();
+    await Future<void>.delayed(Duration.zero);
+    final stopping = f.stop();
+    expect(f.current, isNull);
+    gate.complete(200);
+    await syncing;
+    await stopping;
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+    expect(calls.map((c) => c.method), ['POST', 'POST', 'DELETE']); // the DELETE goes after the POST
+  });
+
+  test('second follow wins over first', () async {
+    final f = await make();
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final first = f.follow(train);
+    await Future<void>.delayed(Duration.zero);
+    final second = f.follow(other);
+    gate.complete(200);
+    await first;
+    expect(await second, isTrue);
+    expect(f.current, other);
+    expect(FollowedTrain.fromJson(saved()!['train'] as Map<String, dynamic>), other);
+    expect(calls.map((c) => c.body['std']), ['09:30', '09:40']);
+  });
+
+  test('token rotation deletes old registration', () async {
+    save(train, now, token: 'old');
+    push.current = 'new';
+    final f = await make();
+    expect(calls.map((c) => c.method), ['DELETE', 'POST']);
+    expect(calls[0].body, {'token': 'old'});
+    expect(calls[1].body['token'], 'new');
+    expect(f.current, train);
+    expect(saved()!['token'], 'new');
+
+    // Following again with yet another token also deletes the previous one.
+    push.current = 'newer';
+    await f.follow(other);
+    expect(calls.map((c) => c.method), ['DELETE', 'POST', 'DELETE', 'POST']);
+    expect(calls[2].body, {'token': 'new'});
+    expect(calls[3].body['token'], 'newer');
+  });
+
+  test('create calls sync', () async {
+    save(train, now.subtract(const Duration(minutes: 10)));
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final f = await PushFollower.create(client: client, prefs: prefs, push: push, clock: () => now);
+    expect(f.current, train); // shown before the server answers
+    await pumpEventQueue();
+    gate.complete(200);
+    await pumpEventQueue();
+    expect(f.current, train);
+    expect(calls.single.method, 'POST');
+    expect(calls.single.body['startedAt'], now.subtract(const Duration(minutes: 10)).millisecondsSinceEpoch);
+  });
+
+  test('create with nothing saved sends nothing', () async {
+    final f = await make();
+    expect(f.current, isNull);
+    expect(calls, isEmpty);
+  });
+}

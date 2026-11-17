@@ -12,6 +12,8 @@ import 'app_controller.dart';
 import 'data/departures.dart';
 import 'follow/follow_service.dart';
 import 'follow/follower.dart';
+import 'follow/push_follower.dart';
+import 'follow/push_token.dart';
 import 'location.dart';
 import 'ui/home_screen.dart';
 
@@ -21,15 +23,22 @@ Future<void> main() async {
   tzdata.initializeTimeZones();
   final client = http.Client();
   final departures = DeparturesClient(client);
+  final prefs = await SharedPreferences.getInstance();
   final controller = AppController(
     client,
     await getApplicationSupportDirectory(),
     departures,
     GeolocatorLocationSource(),
-    await SharedPreferences.getInstance(),
+    prefs,
   );
-  // Following a train needs a background service: Android only for now.
-  final follower = !kIsWeb && Platform.isAndroid ? await FollowService.create() : null;
+  // Android follows in a background service; iOS asks the server to follow and push alerts.
+  final Follower? follower = kIsWeb
+      ? null
+      : Platform.isAndroid
+          ? await FollowService.create()
+          : Platform.isIOS
+              ? await PushFollower.create(client: client, prefs: prefs, push: const ChannelPushToken())
+              : null;
   runApp(PlatformApp(controller: controller, follower: follower, fetchStops: departures.fetchStops));
 }
 

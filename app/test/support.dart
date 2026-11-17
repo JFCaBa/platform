@@ -149,11 +149,15 @@ class FakeTimer implements Timer {
 class FakeFollower extends ChangeNotifier implements Follower {
   FakeFollower({this.granted = true});
   bool granted;
+
+  /// Thrown by follow() when set.
+  Exception? failure;
   @override
   FollowedTrain? current;
 
   @override
   Future<bool> follow(FollowedTrain t) async {
+    if (failure != null) throw failure!;
     if (!granted) return false;
     current = t;
     notifyListeners();
@@ -168,4 +172,8 @@ class FakeFollower extends ChangeNotifier implements Follower {
 
   @override
   Future<void> sync() async {}
+
+  int settingsOpened = 0;
+  @override
+  Future<void> openSettings() async => settingsOpened++;
 }

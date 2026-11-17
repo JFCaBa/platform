@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 import '../data/departures.dart';
@@ -95,6 +96,12 @@ class FollowService extends ChangeNotifier implements Follower {
         await FlutterForegroundTask.stopService();
         _set(null);
       });
+
+  /// flutter_foreground_task has no notification-settings page; the app details page has the toggle.
+  @override
+  Future<void> openSettings() async {
+    await Geolocator.openAppSettings();
+  }
 
   void _onTaskData(Object data) {
     if (data is! String) return;

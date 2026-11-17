@@ -227,18 +227,38 @@ Future<void> _toggleFollow(BuildContext context, Follower follower, FollowedTrai
     return;
   }
   final previous = follower.current;
-  if (!await follower.follow(t)) {
-    messenger.showSnackBar(const SnackBar(content: Text('Allow notifications to follow a train')));
-    return;
-  }
+  if (!await _follow(messenger, follower, t)) return;
   messenger.showSnackBar(SnackBar(
     content: Text('Following ${t.title}'),
     action: SnackBarAction(
       label: 'Undo',
-      onPressed: () => previous == null ? follower.stop() : follower.follow(previous),
+      onPressed: () => previous == null ? follower.stop() : _follow(messenger, follower, previous),
     ),
   ));
 }
+
+/// Follows [t]; on failure shows why and returns false.
+Future<bool> _follow(ScaffoldMessengerState messenger, Follower follower, FollowedTrain t) async {
+  String? problem;
+  try {
+    if (!await follower.follow(t)) problem = _deniedText;
+  } on FollowFailed catch (e) {
+    problem = switch (e.reason) {
+      'gone' => 'That train has left',
+      'network' => "Couldn't follow: check your connection",
+      _ => _deniedText,
+    };
+  }
+  if (problem == null) return true;
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(SnackBar(
+    content: Text(problem),
+    action: problem == _deniedText ? SnackBarAction(label: 'Settings', onPressed: follower.openSettings) : null,
+  ));
+  return false;
+}
+
+const _deniedText = 'Allow notifications to follow a train';
 
 /// Under an open train: follow button (where following works) and the stops still ahead.
 class _StopsPanel extends StatelessWidget {
