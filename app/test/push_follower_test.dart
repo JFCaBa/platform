@@ -427,4 +427,40 @@ void main() {
       await p.openSettings();
     });
   });
+
+  test('stop clears the saved follow at once, before the queue drains', () async {
+    final f = await make();
+    await f.follow(train);
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final following = f.follow(other); // POST held; the first train is still saved
+    await pumpEventQueue();
+    final stopping = f.stop();
+    expect(prefs.getString('push_follow'), isNull); // as if iOS killed the app now
+    expect(f.current, isNull);
+    gate.complete(200);
+    await following;
+    await stopping;
+    expect(saved(), isNull);
+    expect(calls.map((c) => c.method), ['POST', 'POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+  });
+
+  test('stop with a pending sync deletes both the saved and the new registration', () async {
+    save(train, now, token: 'old');
+    push.current = 'new';
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final f = await PushFollower.create(client: client, prefs: prefs, push: push, clock: () => now);
+    await pumpEventQueue(); // sync: DELETE old, POST new (held)
+    final stopping = f.stop();
+    expect(prefs.getString('push_follow'), isNull);
+    gate.complete(200);
+    await stopping;
+    expect(saved(), isNull);
+    expect(f.current, isNull);
+    final deletes = calls.where((c) => c.method == 'DELETE').map((c) => c.body['token']);
+    expect(deletes, containsAll(['old', 'new']));
+    expect(calls.last.method, 'DELETE');
+  });
 }

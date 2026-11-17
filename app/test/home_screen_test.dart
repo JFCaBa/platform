@@ -361,7 +361,7 @@ void main() {
       expect(f.settingsOpened, 1);
     });
 
-    testWidgets('no push token also offers Settings', (tester) async {
+    testWidgets('FollowFailure.notifications also offers Settings', (tester) async {
       final f = FakeFollower()..failure = const FollowFailed(FollowFailure.notifications);
       await pump(tester, follower: f);
       await tester.longPress(find.text('09:30'));

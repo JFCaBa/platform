@@ -98,11 +98,16 @@ class PushFollower extends ChangeNotifier implements Follower {
   @override
   Future<void> stop() {
     ++_gen;
+    // Forget the follow on disk right away: if iOS kills the app while the queue waits, a relaunch
+    // must not bring it back.
+    final saved = _saved()?.token;
+    final removed = _prefs.remove(_key);
     _set(null);
     return _serial(() async {
-      // Decided here, once any earlier POST has answered.
-      final tokens = {?_saved()?.token, ?_registered?.token};
-      await _prefs.remove(_key);
+      await removed;
+      // _registered is read here, once any earlier POST has answered.
+      final tokens = {?saved, ?_saved()?.token, ?_registered?.token};
+      await _prefs.remove(_key); // again: a pending follow's save may have rewritten it
       for (final t in tokens) {
         await _delete(t);
       }
