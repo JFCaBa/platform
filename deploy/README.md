@@ -55,7 +55,7 @@ curl -s -A platform-check -o /dev/null -D - https://api.whatplatform.uk/departur
 ```
 
 ```sh
-curl -s -A platform-check -X POST https://api.whatplatform.uk/follow -d '{}'   # {"error":"bad request"} (400)
+curl -s -A platform-check -X POST https://api.whatplatform.uk/follow -d '{}'   # {"error":"bad request"} (400) with APNS_* set
 ```
 
-Without the `APNS_*` variables a valid `/follow` body answers `503 unavailable`.
+Without the `APNS_*` variables every `/follow` request answers `503 unavailable` (checked before the body), and the log says `follow: off`.

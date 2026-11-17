@@ -54,3 +54,9 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 ## Play 1.1.0 (7)
 - Borrador en Alpha con notas en-GB y declaración FGS (dataSync, Network processing → Other, vídeo
   https://www.youtube.com/watch?v=CzQffbLA2To). Se envía cuando Google apruebe la versión 4.
+
+## Seguir trenes en iOS (servidor, 17-11-2026)
+- Rama feat/ios-follow-push fusionada en main (d715b4c) + CI arreglada (instala requirements.txt). App 1.2.0+8 lista en código, sin subir.
+- VPS desplegado ~21:30: API reconstruida (log `follow: off (APNS_* missing or invalid)`), nginx con `location = /follow` recargado (`nginx -t` OK).
+  Comprobado: /health ok, /departures/KGX 200, POST /follow → 503 unavailable (sin clave APNs), GET /follow 403, política con la sección iPhone publicada.
+- Pendiente: clave APNs (.p8) en el equipo 338 TAC → `APNS_*` en /opt/platform/.env → `docker compose up -d` (log `follow: on`); prueba en iPhone real; 1.2.0 (8) a App Store tras aprobarse la 1.1.0, con App Privacy "Device ID · Not Linked · App Functionality".
