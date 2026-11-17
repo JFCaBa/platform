@@ -60,3 +60,6 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 - VPS desplegado ~21:30: API reconstruida (log `follow: off (APNS_* missing or invalid)`), nginx con `location = /follow` recargado (`nginx -t` OK).
   Comprobado: /health ok, /departures/KGX 200, POST /follow → 503 unavailable (sin clave APNs), GET /follow 403, política con la sección iPhone publicada.
 - Pendiente: clave APNs (.p8) en el equipo 338 TAC → `APNS_*` en /opt/platform/.env → `docker compose up -d` (log `follow: on`); prueba en iPhone real; 1.2.0 (8) a App Store tras aprobarse la 1.1.0, con App Privacy "Device ID · Not Linked · App Functionality".
+- 17-11-2026 ~21:50: Push Notifications activado en el App ID com.jfcaba.platform. No se pudo crear clave APNs nueva (límite de 2 claves team-scoped Sandbox & Production en 338 TAC):
+  se reutiliza la de Matchday (Key ID SAZJXCZQW3, fichero en /home/ubuntu/matchday-secrets/apns-key.p8 del mismo VPS). Revocarla rompería Matchday y What Platform a la vez.
+  APNS_* añadidos a /opt/platform/.env (copia previa .env.bak-202611172048, 600 root). Log: `follow: on`. POST {} → 400, tren inexistente → 410, DELETE → 204.
