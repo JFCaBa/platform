@@ -14,11 +14,15 @@ import UserNotifications
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    UNUserNotificationCenter.current().delegate = self
+    return launched
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    // After the plugins register, so no plugin can take over as the notification delegate.
+    UNUserNotificationCenter.current().delegate = self
     let channel = FlutterMethodChannel(
       name: "whatplatform/push", binaryMessenger: engineBridge.applicationRegistrar.messenger())
     channel.setMethodCallHandler { [weak self] call, result in
@@ -84,14 +88,33 @@ import UserNotifications
     super.application(application, didFailToRegisterForRemoteNotificationsWithError: error)
   }
 
-  /// "sandbox" for development-signed builds (their provisioning profile says aps-environment
-  /// development); App Store and TestFlight builds carry no profile and use "production".
+  /// iOS hides pushes while the app is open: show the follow alerts anyway.
+  override func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler([.banner, .list, .sound])
+  }
+
+  /// The APNs environment the token belongs to, from the provisioning profile's aps-environment:
+  /// App Store and TestFlight builds carry no profile and use "production". A profile we can't read
+  /// falls back on the build type.
   private static func apsEnvironment() -> String {
-    guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-      let data = try? Data(contentsOf: url)
-    else { return "production" }
-    let text = String(decoding: data, as: UTF8.self)
-    let pattern = "<key>aps-environment</key>\\s*<string>development</string>"
-    return text.range(of: pattern, options: .regularExpression) != nil ? "sandbox" : "production"
+    guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") else {
+      return "production"
+    }
+    if let data = try? Data(contentsOf: url) {
+      let text = String(decoding: data, as: UTF8.self)
+      let pattern = "<key>aps-environment</key>\\s*<string>(development|production)</string>"
+      if let range = text.range(of: pattern, options: .regularExpression) {
+        return text[range].contains("development") ? "sandbox" : "production"
+      }
+    }
+    #if DEBUG
+      return "sandbox"
+    #else
+      return "production"
+    #endif
   }
 }

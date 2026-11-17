@@ -47,10 +47,15 @@ class PushFollower extends ChangeNotifier implements Follower {
   /// must not change the state.
   int _gen = 0;
 
+  /// What the server last accepted (a POST answered 200), even from a superseded operation, until
+  /// that token is deleted: so a stop or a later follow can always clean it up.
+  _Saved? _registered;
+
   @override
   FollowedTrain? get current => _current;
 
-  /// One request at a time, so the server sees them in the order they were made.
+  /// One operation at a time, so the server sees requests in the order they were made and the
+  /// saved state only changes inside the queue.
   Future<T> _serial<T>(Future<T> Function() f) {
     final r = _queue.then((_) => f());
     _queue = r.then((_) {}, onError: (_) {});
@@ -64,32 +69,43 @@ class PushFollower extends ChangeNotifier implements Follower {
       if (gen != _gen) return true; // a later follow or stop already replaced this one
       if (!await _push.requestPermission()) return false;
       final token = await _push.token();
-      if (token == null) throw const FollowFailed('notifications');
+      // Allowed, but the device couldn't register: not something Settings can fix.
+      if (token == null) throw const FollowFailed(FollowFailure.network);
       final env = await _push.environment();
       if (gen != _gen) return true;
       final old = _saved();
-      if (old != null && old.token != token) await _delete(old.token);
+      if (old != null && old.token != token) {
+        // Token rotated: the old registration and the train shown for it are gone either way.
+        await _delete(old.token);
+        await _clear();
+      }
+      final stray = _registered;
+      if (stray != null && stray.token != token) await _delete(stray.token);
       final s = _Saved(t, _clock().millisecondsSinceEpoch, token, env);
       final code = await _post(s);
       if (gen != _gen) return true;
       if (code == 200) {
         await _save(s);
+        if (gen != _gen) return true;
         _set(t);
         return true;
       }
-      throw FollowFailed(code == 410 ? 'gone' : 'network');
+      await _dropStray();
+      throw FollowFailed(code == 410 ? FollowFailure.gone : FollowFailure.network);
     });
   }
 
   @override
   Future<void> stop() {
     ++_gen;
-    final old = _saved();
-    final cleared = _prefs.remove(_key);
     _set(null);
     return _serial(() async {
-      await cleared;
-      if (old != null) await _delete(old.token);
+      // Decided here, once any earlier POST has answered.
+      final tokens = {?_saved()?.token, ?_registered?.token};
+      await _prefs.remove(_key);
+      for (final t in tokens) {
+        await _delete(t);
+      }
     });
   }
 
@@ -123,12 +139,23 @@ class PushFollower extends ChangeNotifier implements Follower {
   @override
   Future<void> openSettings() => _push.openSettings();
 
+  /// After a failed follow: the server may still hold a registration from a superseded follow that
+  /// no saved state accounts for. Delete it, and any saved follow it replaced on the server.
+  Future<void> _dropStray() async {
+    final stray = _registered;
+    final saved = _saved();
+    if (stray == null || stray == saved) return;
+    await _delete(stray.token);
+    if (saved != null && saved.token == stray.token) await _clear();
+  }
+
   /// POST /follow; the HTTP status, or null on a network error.
   Future<int?> _post(_Saved s) async {
     try {
       final r = await _client
           .post(Uri.parse('$_baseUrl/follow'), headers: _headers, body: jsonEncode(s.body()))
           .timeout(_timeout);
+      if (r.statusCode == 200) _registered = s;
       return r.statusCode;
     } catch (_) {
       return null;
@@ -137,6 +164,7 @@ class PushFollower extends ChangeNotifier implements Follower {
 
   /// Best-effort DELETE /follow: the server also ends follows on its own after 3 h.
   Future<void> _delete(String token) async {
+    if (_registered?.token == token) _registered = null;
     try {
       await _client
           .delete(Uri.parse('$_baseUrl/follow'), headers: _headers, body: jsonEncode({'token': token}))
@@ -183,4 +211,15 @@ class _Saved {
   Map<String, dynamic> toJson() => {'train': train.toJson(), 'startedAt': startedAt, 'token': token, 'env': env};
 
   Map<String, dynamic> body() => {'token': token, 'env': env, ...train.toJson(), 'startedAt': startedAt};
+
+  @override
+  bool operator ==(Object other) =>
+      other is _Saved &&
+      other.train == train &&
+      other.startedAt == startedAt &&
+      other.token == token &&
+      other.env == env;
+
+  @override
+  int get hashCode => Object.hash(train, startedAt, token, env);
 }

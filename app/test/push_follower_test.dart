@@ -29,6 +29,34 @@ class FakePushToken implements PushToken {
   Future<void> openSettings() async => settingsOpened++;
 }
 
+Matcher failed(FollowFailure r) => isA<FollowFailed>().having((e) => e.reason, 'reason', r);
+
+/// Real prefs whose setString can be held, to land a stop() while a save is pending.
+class GatedPrefs implements SharedPreferences {
+  GatedPrefs(this._real);
+  final SharedPreferences _real;
+  Completer<void>? hold;
+  bool saving = false;
+
+  @override
+  String? getString(String key) => _real.getString(key);
+
+  @override
+  Future<bool> setString(String key, String value) async {
+    saving = true;
+    final h = hold;
+    if (h != null) await h.future;
+    saving = false;
+    return _real.setString(key, value);
+  }
+
+  @override
+  Future<bool> remove(String key) => _real.remove(key);
+
+  @override
+  dynamic noSuchMethod(Invocation i) => throw UnimplementedError('${i.memberName}');
+}
+
 class Call {
   Call(this.method, this.body);
   final String method;
@@ -73,8 +101,8 @@ void main() {
         code == 200 ? '{"ok":true}' : code == 410 ? '{"error":"gone"}' : '{"error":"x"}', code);
   });
 
-  Future<PushFollower> make() async {
-    final f = await PushFollower.create(client: client, prefs: prefs, push: push, clock: () => now);
+  Future<PushFollower> make({SharedPreferences? store}) async {
+    final f = await PushFollower.create(client: client, prefs: store ?? prefs, push: push, clock: () => now);
     await pumpEventQueue(); // let create's sync finish
     return f;
   }
@@ -138,10 +166,10 @@ void main() {
     expect(push.settingsOpened, 1);
   });
 
-  test('no token throws notifications', () async {
+  test('no token with permission throws network', () async {
     push.current = null;
     final f = await make();
-    await expectLater(f.follow(train), throwsA(isA<FollowFailed>().having((e) => e.reason, 'reason', 'notifications')));
+    await expectLater(f.follow(train), throwsA(failed(FollowFailure.network)));
     expect(calls, isEmpty);
     expect(f.current, isNull);
   });
@@ -149,7 +177,7 @@ void main() {
   test('410 throws gone and saves nothing', () async {
     postAnswers = [410];
     final f = await make();
-    await expectLater(f.follow(train), throwsA(isA<FollowFailed>().having((e) => e.reason, 'reason', 'gone')));
+    await expectLater(f.follow(train), throwsA(failed(FollowFailure.gone)));
     expect(f.current, isNull);
     expect(saved(), isNull);
   });
@@ -158,7 +186,7 @@ void main() {
     postAnswers = [409, 503, const SocketException('offline')];
     final f = await make();
     for (var i = 0; i < 3; i++) {
-      await expectLater(f.follow(train), throwsA(isA<FollowFailed>().having((e) => e.reason, 'reason', 'network')));
+      await expectLater(f.follow(train), throwsA(failed(FollowFailure.network)));
     }
     expect(f.current, isNull);
     expect(saved(), isNull);
@@ -299,5 +327,104 @@ void main() {
     final f = await make();
     expect(f.current, isNull);
     expect(calls, isEmpty);
+  });
+
+  test('stop during pending first follow (nothing saved) sends DELETE after the POST', () async {
+    final f = await make();
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final following = f.follow(train);
+    await pumpEventQueue();
+    final stopping = f.stop();
+    gate.complete(200);
+    await following;
+    await stopping;
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+  });
+
+  test("superseded follow's 200 is never saved after stop", () async {
+    final f = await make();
+    final gate = Completer<Object>();
+    postAnswers = [gate];
+    final seen = <FollowedTrain?>[];
+    f.addListener(() => seen.add(f.current));
+    final following = f.follow(train);
+    await pumpEventQueue();
+    final stopping = f.stop();
+    gate.complete(200);
+    await following;
+    await stopping;
+    await f.sync();
+    expect(seen, isNot(contains(train)));
+    expect(saved(), isNull);
+    expect(f.current, isNull);
+  });
+
+  test('superseded follow then failing follow sends DELETE of the stray registration', () async {
+    final f = await make();
+    final gate = Completer<Object>();
+    postAnswers = [gate, 410];
+    final first = f.follow(train);
+    await pumpEventQueue();
+    final second = f.follow(other);
+    gate.complete(200); // the server now holds the first train, which nothing saved
+    await first;
+    await expectLater(second, throwsA(failed(FollowFailure.gone)));
+    expect(calls.map((c) => c.method), ['POST', 'POST', 'DELETE']);
+    expect(calls.last.body, {'token': 'abc123'});
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+
+    // Nothing stray is left for a later stop to delete again.
+    await f.stop();
+    expect(calls.map((c) => c.method), ['POST', 'POST', 'DELETE']);
+  });
+
+  test('stop arriving while the follow save is pending: nothing shown or persisted', () async {
+    final gated = GatedPrefs(prefs)..hold = Completer<void>();
+    final f = await make(store: gated);
+    final seen = <FollowedTrain?>[];
+    f.addListener(() => seen.add(f.current));
+    final following = f.follow(train);
+    while (!gated.saving) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final stopping = f.stop();
+    gated.hold!.complete();
+    await following;
+    await stopping;
+    expect(seen, isNot(contains(train)));
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+    expect(calls.map((c) => c.method), ['POST', 'DELETE']);
+  });
+
+  test('token rotation then failed POST leaves no stale follow', () async {
+    save(train, now, token: 'old');
+    push.current = 'old';
+    final f = await make(); // sync re-posts with the same token
+    expect(f.current, train);
+    push.current = 'new';
+    postAnswers = [503];
+    await expectLater(f.follow(other), throwsA(failed(FollowFailure.network)));
+    expect(calls.map((c) => c.method), ['POST', 'DELETE', 'POST']);
+    expect(calls[1].body, {'token': 'old'});
+    expect(f.current, isNull);
+    expect(saved(), isNull);
+  });
+
+  group('ChannelPushToken with no native side', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const p = ChannelPushToken();
+
+    test('fails quietly', () async {
+      expect(await p.requestPermission(), isFalse);
+      expect(await p.token(), isNull);
+      expect(await p.environment(), 'production');
+      await p.openSettings();
+    });
   });
 }

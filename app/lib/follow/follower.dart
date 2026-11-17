@@ -18,11 +18,21 @@ abstract class Follower implements Listenable {
   Future<void> openSettings();
 }
 
-/// Why [Follower.follow] could not start: 'notifications' (no push token), 'gone' (the train has
-/// left) or 'network' (any other failure).
+/// Why [Follower.follow] could not start.
+enum FollowFailure {
+  /// Notifications are not allowed: the user can fix it in Settings.
+  notifications,
+
+  /// The train has left (or is no longer on the board).
+  gone,
+
+  /// Anything else: network, server, or the device could not get a push token.
+  network,
+}
+
 class FollowFailed implements Exception {
   const FollowFailed(this.reason);
-  final String reason;
+  final FollowFailure reason;
 
   @override
   String toString() => 'FollowFailed($reason)';

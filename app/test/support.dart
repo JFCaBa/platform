@@ -152,6 +152,9 @@ class FakeFollower extends ChangeNotifier implements Follower {
 
   /// Thrown by follow() when set.
   Exception? failure;
+
+  /// False: follow() answers true but leaves [current] alone, as when a later call superseded it.
+  bool adopt = true;
   @override
   FollowedTrain? current;
 
@@ -159,6 +162,7 @@ class FakeFollower extends ChangeNotifier implements Follower {
   Future<bool> follow(FollowedTrain t) async {
     if (failure != null) throw failure!;
     if (!granted) return false;
+    if (!adopt) return true;
     current = t;
     notifyListeners();
     return true;

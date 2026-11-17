@@ -228,6 +228,7 @@ Future<void> _toggleFollow(BuildContext context, Follower follower, FollowedTrai
   }
   final previous = follower.current;
   if (!await _follow(messenger, follower, t)) return;
+  if (follower.current != t) return; // a later follow or stop replaced this one meanwhile
   messenger.showSnackBar(SnackBar(
     content: Text('Following ${t.title}'),
     action: SnackBarAction(
@@ -244,9 +245,9 @@ Future<bool> _follow(ScaffoldMessengerState messenger, Follower follower, Follow
     if (!await follower.follow(t)) problem = _deniedText;
   } on FollowFailed catch (e) {
     problem = switch (e.reason) {
-      'gone' => 'That train has left',
-      'network' => "Couldn't follow: check your connection",
-      _ => _deniedText,
+      FollowFailure.gone => 'That train has left',
+      FollowFailure.network => "Couldn't follow: check your connection",
+      FollowFailure.notifications => _deniedText,
     };
   }
   if (problem == null) return true;

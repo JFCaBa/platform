@@ -362,7 +362,7 @@ void main() {
     });
 
     testWidgets('no push token also offers Settings', (tester) async {
-      final f = FakeFollower()..failure = FollowFailed('notifications');
+      final f = FakeFollower()..failure = const FollowFailed(FollowFailure.notifications);
       await pump(tester, follower: f);
       await tester.longPress(find.text('09:30'));
       await tester.pump();
@@ -371,7 +371,7 @@ void main() {
     });
 
     testWidgets('network failure has no Settings action', (tester) async {
-      final f = FakeFollower()..failure = FollowFailed('network');
+      final f = FakeFollower()..failure = const FollowFailed(FollowFailure.network);
       await pump(tester, follower: f);
       await tester.longPress(find.text('09:30'));
       await tester.pump();
@@ -379,7 +379,7 @@ void main() {
     });
 
     testWidgets('gone shows "That train has left"', (tester) async {
-      final f = FakeFollower()..failure = FollowFailed('gone');
+      final f = FakeFollower()..failure = const FollowFailed(FollowFailure.gone);
       await pump(tester, follower: f);
       await tester.longPress(find.text('09:30'));
       await tester.pump();
@@ -389,11 +389,20 @@ void main() {
     });
 
     testWidgets('network failure says so', (tester) async {
-      final f = FakeFollower()..failure = FollowFailed('network');
+      final f = FakeFollower()..failure = const FollowFailed(FollowFailure.network);
       await pump(tester, follower: f);
       await tester.longPress(find.text('09:30'));
       await tester.pump();
       expect(find.text("Couldn't follow: check your connection"), findsOneWidget);
+    });
+
+    testWidgets('a follow replaced meanwhile shows no "Following" snackbar', (tester) async {
+      final f = FakeFollower()..adopt = false; // follow() succeeds, but another train is current by then
+      await pump(tester, follower: f);
+      await tester.longPress(find.text('09:30'));
+      await tester.pump();
+      expect(find.textContaining('Following'), findsNothing);
+      expect(find.text('Undo'), findsNothing);
     });
 
     testWidgets('Undo that fails to re-follow shows the reason', (tester) async {
@@ -403,7 +412,7 @@ void main() {
       await tester.longPress(find.text('09:30'));
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      f.failure = FollowFailed('gone');
+      f.failure = const FollowFailed(FollowFailure.gone);
       await tester.tap(find.text('Undo'));
       await tester.pump();
       await tester.pump(const Duration(seconds: 1)); // the Undo snackbar slid out, the reason in
