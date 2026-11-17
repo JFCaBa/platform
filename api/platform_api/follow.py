@@ -132,6 +132,11 @@ class FollowStore:
                 setattr(cur, k, dict(v) if k == "last" and v is not None else v)
             return True
 
+    def is_current(self, token: str, gen: int) -> bool:
+        with self._lock:
+            cur = self._follows.get(token)
+            return cur is not None and cur.gen == gen
+
     def remove(self, token: str, gen: int | None = None) -> None:
         with self._lock:
             cur = self._follows.get(token)
@@ -184,7 +189,10 @@ class Poller:
                     return
                 continue
             for f in self._store.for_station(crs):
-                self._check(f, board, now)
+                try:
+                    self._check(f, board, now)
+                except Exception as e:  # one bad follow or service entry never stops the tick
+                    self._note(e)
 
     def _expire(self, now: float) -> None:
         for crs in self._store.stations():
@@ -194,6 +202,10 @@ class Poller:
                     self._store.remove(f.token, f.gen)
 
     def _check(self, f: Follow, board: dict, now: float) -> None:
+        # The copies were taken before earlier sends at this station; skip a follow deleted or
+        # replaced since then.
+        if not self._store.is_current(f.token, f.gen):
+            return
         d = find_followed(board, f.train)
         if d is None:
             if f.missing + 1 >= 2:
@@ -208,7 +220,11 @@ class Poller:
         texts = changes(f.last or {}, d)
         if texts:
             title = f"{f.train.get('std')} to {f.train.get('destination')}"
-            result = self._push.send(f.token, f.env, title, "\n".join(texts), collapse_id(f.token, f.train))
+            try:
+                result = self._push.send(f.token, f.env, title, "\n".join(texts), collapse_id(f.token, f.train))
+            except Exception as e:
+                self._note(e)
+                result = "error"
             if result == "gone":
                 self._store.remove(f.token, f.gen)
                 return
@@ -219,9 +235,13 @@ class Poller:
         while not stop.is_set():
             try:
                 self.tick()
-            except Exception as e:  # keep the thread alive; never log tokens
-                try:
-                    self._log.write(f"follow poller: {type(e).__name__}\n")
-                except Exception:
-                    pass
+            except Exception as e:  # keep the thread alive
+                self._note(e)
             stop.wait(every)
+
+    def _note(self, e: BaseException) -> None:
+        """Logs the exception type only: messages may carry tokens."""
+        try:
+            self._log.write(f"follow poller: {type(e).__name__}\n")
+        except Exception:
+            pass

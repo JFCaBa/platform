@@ -428,6 +428,82 @@ class PollerTest(unittest.TestCase):
         self.assertEqual(len(self.boards.calls), 3)
         self.assertEqual(len(self.push.sent), 2)
 
+    def test_is_current(self):
+        self.follow()
+        gen = self.only().gen
+        self.assertTrue(self.store.is_current(TOKEN, gen))
+        self.assertFalse(self.store.is_current(TOKEN, gen + 1))
+        self.assertFalse(self.store.is_current(TOKEN2, gen))
+
+    def test_other_follow_deleted_during_send_not_pushed(self):
+        self.follow(TOKEN)
+        self.follow(TOKEN2)
+        self.push.hook = lambda: self.store.remove(TOKEN2)
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual([s[0] for s in self.push.sent], [TOKEN])
+        self.assertEqual([f.token for f in self.store.for_station("CDF")], [TOKEN])
+
+    def test_other_follow_replaced_during_send_not_pushed(self):
+        same_board = train(std="08:12", dest="Cardiff Central", sid="NEW")
+        self.follow(TOKEN)
+        self.follow(TOKEN2)
+        self.push.hook = lambda: self.store.upsert(TOKEN2, "sandbox", same_board, {"platform": "1"}, T0 + 5)
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        self.poller.tick()
+        self.assertEqual([s[0] for s in self.push.sent], [TOKEN])
+        f = next(f for f in self.store.for_station("CDF") if f.token == TOKEN2)
+        self.assertEqual((f.env, f.train, f.last, f.missing), ("sandbox", same_board, {"platform": "1"}, 0))
+
+    def test_replaced_during_ok_send_untouched(self):
+        other = train(crs="NWP", std="09:00", dest="Swansea")
+        self.push.hook = lambda: self.store.upsert(TOKEN, "sandbox", other, {"platform": "1"}, T0 + 5)
+        self.follow()
+        self.boards.set("CDF", dep(platform="5", etd="Cancelled", cancelled=True))
+        self.poller.tick()
+        self.assertEqual(len(self.push.sent), 1)
+        f = self.only("NWP")
+        self.assertEqual((f.env, f.train, f.last, f.started, f.missing, f.cancelled_at),
+                         ("sandbox", other, {"platform": "1"}, T0 + 5, 0, None))
+
+    def test_push_raises_counts_as_error_and_others_continue(self):
+        import io
+        from platform_api.follow import Poller
+
+        class Flaky(Push):
+            def send(self, token, *a):
+                super().send(token, *a)
+                if token == TOKEN:
+                    raise RuntimeError("secret " + token)
+                return "ok"
+
+        log = io.StringIO()
+        push = Flaky()
+        p = Poller(self.store, self.boards, push, clock=self.clock, log=log)
+        self.follow(TOKEN)
+        self.follow(TOKEN2)
+        self.boards.set("CDF", dep(platform="5", etd="On time"))
+        p.tick()
+        self.assertEqual([s[0] for s in push.sent], [TOKEN, TOKEN2])
+        self.assertEqual({f.token: f.last["platform"] for f in self.store.for_station("CDF")},
+                         {TOKEN: "5", TOKEN2: "5"})
+        self.assertNotIn(TOKEN, log.getvalue())
+
+    def test_malformed_board_does_not_stop_other_station(self):
+        import io
+        from platform_api.follow import Poller
+        log = io.StringIO()
+        p = Poller(self.store, self.boards, self.push, clock=self.clock, log=log)
+        self.follow(TOKEN)
+        self.follow(TOKEN2, t=train(crs="NWP"))
+        self.boards.boards["CDF"] = {"crs": "CDF", "services": [None, 7]}
+        self.boards.set("NWP", dep(platform="5", etd="On time"))
+        p.tick()
+        self.assertEqual([s[0] for s in self.push.sent], [TOKEN2])
+        self.assertEqual(len(self.store), 2)
+        self.assertEqual(log.getvalue(), "follow poller: AttributeError\n")
+        self.assertNotIn(TOKEN, log.getvalue())
+
     def test_run_survives_tick_errors_and_stops(self):
         import threading
         stop = threading.Event()
