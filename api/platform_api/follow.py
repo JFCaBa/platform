@@ -1,6 +1,12 @@
 """Change rules for a followed train; a Python port of the app's follow_logic.dart `changes()`."""
 from __future__ import annotations
 
+import dataclasses
+import threading
+import time
+from dataclasses import dataclass
+from typing import Callable
+
 from .board import HHMM
 
 
@@ -47,3 +53,83 @@ def changes(before: dict, after: dict) -> list[str]:
         elif e1 == "Delayed":
             out.append("Delayed")
     return out
+
+
+_SAME_KEYS = ("crs", "std", "destination", "serviceId")
+
+
+def _same_train(a: dict, b: dict) -> bool:
+    return all(a.get(k) == b.get(k) for k in _SAME_KEYS)
+
+
+@dataclass
+class Follow:
+    token: str
+    env: str
+    train: dict
+    started: float
+    last: dict | None
+    cancelled_at: float | None
+    missing: int
+    gen: int
+
+
+class FollowStore:
+    """Follows kept in memory only, keyed by device token. Thread-safe. Every new or replaced
+    follow gets a fresh generation so the poller can tell when it was changed under it."""
+
+    def __init__(self, clock: Callable[[], float] = time.time, max_follows: int = 500,
+                 max_stations: int = 50) -> None:
+        self._clock = clock
+        self._max_follows = max_follows
+        self._max_stations = max_stations
+        self._lock = threading.Lock()
+        self._follows: dict[str, Follow] = {}
+        self._gen = 0
+
+    def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float) -> str:
+        with self._lock:
+            cur = self._follows.get(token)
+            if cur is not None and _same_train(cur.train, train):
+                cur.env = env
+                return "ok"
+            if cur is None and len(self._follows) >= self._max_follows:
+                return "busy"
+            stations = {f.train.get("crs") for t, f in self._follows.items() if t != token}
+            if train.get("crs") not in stations and len(stations) >= self._max_stations:
+                return "busy"
+            self._gen += 1
+            self._follows[token] = Follow(token, env, dict(train), started, baseline, None, 0, self._gen)
+            return "ok"
+
+    def is_same(self, token: str, train: dict) -> bool:
+        with self._lock:
+            cur = self._follows.get(token)
+            return cur is not None and _same_train(cur.train, train)
+
+    def update(self, token: str, gen: int, **fields) -> bool:
+        with self._lock:
+            cur = self._follows.get(token)
+            if cur is None or cur.gen != gen:
+                return False
+            for k, v in fields.items():
+                setattr(cur, k, v)
+            return True
+
+    def remove(self, token: str, gen: int | None = None) -> None:
+        with self._lock:
+            cur = self._follows.get(token)
+            if cur is not None and (gen is None or cur.gen == gen):
+                del self._follows[token]
+
+    def stations(self) -> set[str]:
+        with self._lock:
+            return {f.train.get("crs") for f in self._follows.values()}
+
+    def for_station(self, crs: str) -> list[Follow]:
+        with self._lock:
+            return [dataclasses.replace(f) for f in self._follows.values() if f.train.get("crs") == crs]
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._follows)

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from platform_api.follow import changes, find_followed, matches  # noqa: E402
+from platform_api.follow import FollowStore, changes, find_followed, matches  # noqa: E402
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -48,6 +48,108 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(find_followed({"crs": "CDF", "services": services}, t)["platform"], "3")
         self.assertIsNone(find_followed({"crs": "NWP", "services": services}, t))
         self.assertIsNone(find_followed({"crs": "CDF", "services": [dep(std="08:00")]}, t))
+
+
+def train(crs="CDF", std="08:12", dest="Cardiff Central", sid=None):
+    return {"crs": crs, "std": std, "destination": dest, "serviceId": sid}
+
+
+class Clock:
+    def __init__(self, t=1000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+class FollowStoreTest(unittest.TestCase):
+    def test_upsert_same_train_keeps_baseline_and_start(self):
+        clock = Clock()
+        s = FollowStore(clock=clock)
+        self.assertEqual(s.upsert("aa", "production", train(), {"platform": "1"}, 900.0), "ok")
+        gen = s.for_station("CDF")[0].gen
+        clock.t += 60
+        self.assertEqual(s.upsert("aa", "sandbox", train(), {"platform": "9"}, 960.0), "ok")
+        (f,) = s.for_station("CDF")
+        self.assertEqual(f.last, {"platform": "1"})
+        self.assertEqual(f.started, 900.0)
+        self.assertEqual(f.gen, gen)
+        self.assertEqual(len(s), 1)
+
+    def test_new_train_replaces(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {"platform": "1"}, 900.0)
+        gen = s.for_station("CDF")[0].gen
+        self.assertTrue(s.is_same("aa", train()))
+        self.assertFalse(s.is_same("aa", train(std="09:00")))
+        self.assertFalse(s.is_same("bb", train()))
+        s.upsert("aa", "production", train(crs="NWP", std="09:00"), {"platform": "2"}, 950.0)
+        self.assertEqual(s.for_station("CDF"), [])
+        (f,) = s.for_station("NWP")
+        self.assertEqual((f.started, f.last, f.missing), (950.0, {"platform": "2"}, 0))
+        self.assertNotEqual(f.gen, gen)
+        self.assertEqual(s.stations(), {"NWP"})
+
+    def test_same_train_includes_service_id(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(sid="A1"), {}, 1.0)
+        self.assertTrue(s.is_same("aa", train(sid="A1")))
+        self.assertFalse(s.is_same("aa", train(sid="B2")))
+        self.assertFalse(s.is_same("aa", train()))
+
+    def test_cap_follows(self):
+        s = FollowStore(max_follows=3)
+        for i in range(3):
+            self.assertEqual(s.upsert(f"t{i}", "production", train(), {}, 1.0), "ok")
+        self.assertEqual(s.upsert("t3", "production", train(), {}, 1.0), "busy")
+        self.assertEqual(s.upsert("t0", "production", train(), {}, 1.0), "ok")
+        self.assertEqual(s.upsert("t0", "production", train(std="10:00"), {}, 1.0), "ok")
+        self.assertEqual(len(s), 3)
+
+    def test_cap_stations(self):
+        s = FollowStore(max_stations=2)
+        self.assertEqual(s.upsert("a", "production", train(crs="AAA"), {}, 1.0), "ok")
+        self.assertEqual(s.upsert("b", "production", train(crs="BBB"), {}, 1.0), "ok")
+        self.assertEqual(s.upsert("c", "production", train(crs="CCC"), {}, 1.0), "busy")
+        self.assertEqual(s.upsert("c", "production", train(crs="AAA"), {}, 1.0), "ok")
+        # moving the only follow at a station to another frees that station
+        self.assertEqual(s.upsert("b", "production", train(crs="AAA"), {}, 1.0), "ok")
+        self.assertEqual(s.upsert("d", "production", train(crs="CCC"), {}, 1.0), "ok")
+        self.assertEqual(s.stations(), {"AAA", "CCC"})
+
+    def test_remove_unknown_is_noop(self):
+        s = FollowStore()
+        s.remove("nope")
+        s.remove("nope", 3)
+        self.assertEqual(len(s), 0)
+
+    def test_update_and_remove_with_stale_gen_are_noops(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {"platform": "1"}, 1.0)
+        gen = s.for_station("CDF")[0].gen
+        self.assertTrue(s.update("aa", gen, missing=1, cancelled_at=5.0))
+        (f,) = s.for_station("CDF")
+        self.assertEqual((f.missing, f.cancelled_at), (1, 5.0))
+        self.assertFalse(s.update("aa", gen + 1, missing=2))
+        self.assertFalse(s.update("zz", gen, missing=2))
+        s.remove("aa", gen + 1)
+        self.assertEqual(len(s), 1)
+        self.assertEqual(s.for_station("CDF")[0].missing, 1)
+        s.remove("aa", gen)
+        self.assertEqual(len(s), 0)
+        self.assertEqual(s.stations(), set())
+
+    def test_for_station_returns_copies(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {}, 1.0)
+        s.for_station("CDF")[0].missing = 9
+        self.assertEqual(s.for_station("CDF")[0].missing, 0)
+
+    def test_remove_without_gen(self):
+        s = FollowStore()
+        s.upsert("aa", "production", train(), {}, 1.0)
+        s.remove("aa")
+        self.assertEqual(len(s), 0)
 
 
 if __name__ == "__main__":
