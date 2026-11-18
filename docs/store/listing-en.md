@@ -20,9 +20,15 @@ Open the app and see the next trains from the station you're standing at — wit
 
 Free. No ads, no account, no tracking. Your location stays on your phone.
 
-Train times from National Rail. Station locations from NaPTAN (Department for Transport, OGL).
+Sources
+• Live train times, platforms and service alerts: National Rail (Darwin), https://www.nationalrail.co.uk/ — licensed through the Rail Data Marketplace, https://raildata.org.uk/
+• Station locations: NaPTAN, Department for Transport, Open Government Licence, https://www.data.gov.uk/dataset/ff93ffc1-6656-47d8-9155-85ea0b8f2251/national-public-transport-access-nodes-naptan
+
+What Platform is an independent app. It does not represent any government entity and is not affiliated with or endorsed by the Department for Transport, National Rail or any train operator.
 
 ## App Store (iOS)
+
+The Sources block and the disclaimer go in both stores (Play rejected v4 on 18-11-2026 under Misleading Claims: "Missing Source Link for Government Information").
 
 Same description **without** the "Follow a train (Android)" bullet: following is Android-only for now,
 and the App Store rejects mentions of other platforms (2.3.10). First iOS release ships as 1.1.0, so
