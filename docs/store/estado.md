@@ -54,6 +54,10 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 ## Play 1.1.0 (7)
 - Borrador en Alpha con notas en-GB y declaración FGS (dataSync, Network processing → Other, vídeo
   https://www.youtube.com/watch?v=CzQffbLA2To). Se envía cuando Google apruebe la versión 4.
+- 18-11-2026: el borrador de Alpha pasa a **8 (1.2.0)** (AAB 8 subido por el usuario, el 7 quitado del borrador y
+  sigue en la biblioteca; notas en-GB con "Show more" hasta 4 h). Guardado como borrador, sin enviar: la versión 4
+  sigue en revisión. Publishing overview muestra **Managed publishing on** (no off como decía arriba): al aprobarse
+  la 4 hay que publicarla a mano.
 
 ## Seguir trenes en iOS (servidor, 17-11-2026)
 - Rama feat/ios-follow-push fusionada en main (d715b4c) + CI arreglada (instala requirements.txt). App 1.2.0+8 lista en código, sin subir.
