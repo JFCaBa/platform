@@ -58,6 +58,11 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
   sigue en la biblioteca; notas en-GB con "Show more" hasta 4 h). Guardado como borrador, sin enviar: la versión 4
   sigue en revisión. Publishing overview muestra **Managed publishing on** (no off como decía arriba): al aprobarse
   la 4 hay que publicarla a mano.
+- 18-11-2026 (después): Play no dejaba enviar la 8: `screenOrientation="portrait"` implica
+  `android.hardware.screen.portrait` obligatoria (sin tablets/escritorio/XR). Declarada `required="false"` → build
+  **9 (1.2.0)** (commit 29fe46b). Nueva versión de Alpha con el AAB 9, notas en-GB; vista previa "Ready to release"
+  (+7 tablets, +3 TV). Guardada en Publishing overview, **sin enviar** ("Submit 1 change for review" lo pulsa el
+  usuario, mejor tras aprobarse la 4). iOS sigue en el build 8 en TestFlight (pubspec ya en 1.2.0+9).
 
 ## Seguir trenes en iOS (servidor, 17-11-2026)
 - Rama feat/ios-follow-push fusionada en main (d715b4c) + CI arreglada (instala requirements.txt). App 1.2.0+8 lista en código, sin subir.
