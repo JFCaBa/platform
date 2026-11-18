@@ -70,7 +70,7 @@ Código en main (1.2.0+8), servidor desplegado con `follow: on`, prueba real OK.
 1. Archivar 1.2.0 (8) y comprobar que el IPA exportado lleva `aps-environment` = production (el fichero Runner.entitlements dice development; Xcode lo cambia al exportar).
 2. Subir a App Store Connect (`xcodebuild -exportArchive`, método app-store-connect) y asignar el build a la versión 1.2.0; probar antes por TestFlight (entorno production).
 3. App Privacy: pasar de "Data Not Collected" a Identifiers → Device ID · Not Linked to You · App Functionality.
-4. Ficha: descripción y novedades en-GB con "follow a train on iPhone: alerts for platform, time and cancellation changes"; notas del revisor (seguir un tren, permiso de notificaciones, cómo probarlo).
+4. Ficha: descripción y novedades en-GB con "follow a train on iPhone: alerts for platform, time and cancellation changes" y "scroll down or tap Show more to see trains up to 4 hours ahead"; notas del revisor (seguir un tren, permiso de notificaciones, cómo probarlo).
 5. Captura nueva opcional con la campanita en una fila.
 6. Enviar a revisión: lo pulsa el usuario.
 Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de Play. Pruebas reales pendientes de "Now expected …" y "Cancelled" (Paulo).

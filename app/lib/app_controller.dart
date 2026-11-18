@@ -11,6 +11,7 @@ import 'data/departures.dart';
 import 'data/json_cache.dart';
 import 'data/stations.dart';
 import 'domain/nearest.dart';
+import 'domain/pages.dart';
 import 'location.dart';
 
 const _lastStationKey = 'last_station';
@@ -65,6 +66,21 @@ class AppController extends ChangeNotifier {
   /// A user-requested retry is running.
   bool retrying = false;
 
+  /// Later pages of [station]'s board, oldest first: snapshots, never refetched by the 30 s
+  /// refresh (fewer Darwin calls). Cleared on a new station and on pull-to-refresh.
+  final List<Board> _pages = [];
+  int _pagesGen = 0;
+
+  /// A later page is being fetched.
+  bool loadingMore = false;
+
+  /// The last page added nothing (e.g. the same cached answer again): no more pages until then,
+  /// when Darwin's reach has moved on.
+  DateTime? _stalledUntil;
+
+  /// How long to wait after a page that added nothing.
+  static const stallPause = Duration(minutes: offsetStep);
+
   bool _lastFailed = false;
   DateTime? _rateLimitedUntil;
   int _stationGen = 0;
@@ -103,10 +119,95 @@ class AppController extends ChangeNotifier {
   /// No board could be loaded for the current station.
   bool get loadFailed => board == null && _lastFailed;
 
+  /// Base board plus later pages, by scheduled time.
+  List<Departure> get services {
+    final b = board;
+    return b == null ? const [] : mergeServices(b, _livePages, now());
+  }
+
+  /// The loaded pages that still follow on from the current base board without a gap.
+  List<Board> get _livePages {
+    final b = board;
+    return b == null || _pages.isEmpty ? const [] : contiguousPages(b, _pages, now());
+  }
+
+  /// Offset of the next page, or null when Darwin cannot reach further.
+  int? get _nextOffset {
+    final b = board;
+    if (b == null) return null;
+    final live = _livePages;
+    final last = live.isEmpty ? b : live.last;
+    final s = services;
+    return nextOffset(
+      prevStart: startIn(last, now()),
+      prevComplete: last.complete,
+      lastMinutes: s.isEmpty ? null : minutesUntil(s.last.std, now()),
+    );
+  }
+
+  /// [d] is on the next-trains board (not only on a later page).
+  bool onBaseBoard(Departure d) {
+    final k = trainKey(d);
+    return board?.services.any((x) => trainKey(x) == k) ?? false;
+  }
+
+  /// More trains can be asked for (up to about 4 h ahead).
+  bool get hasMore {
+    final until = _stalledUntil;
+    return !expired && (until == null || !now().isBefore(until)) && _nextOffset != null;
+  }
+
+  /// The last page listed its whole window: nothing more in the next ~4 h.
+  bool get reachedEnd {
+    final live = _livePages;
+    return live.isNotEmpty && live.last.complete && !hasMore;
+  }
+
+  /// Fetches the next later page. One at a time; a failure keeps what is shown.
+  Future<void> loadMore() async {
+    final s = station;
+    final off = _nextOffset;
+    if (s == null || off == null || !hasMore || loadingMore || rateLimited || _disposed) return;
+    final gen = _pagesGen;
+    loadingMore = true;
+    _notify();
+    try {
+      final p = await _departures.fetch(s.crs, offset: off);
+      final b = board;
+      if (gen == _pagesGen && !_disposed && b != null) {
+        final live = _livePages; // forget pages that no longer follow on
+        final t = now();
+        if (coveredEnd(b, [...live, p], t) > coveredEnd(b, live, t)) {
+          _pages
+            ..clear()
+            ..addAll(live)
+            ..add(p);
+          _stalledUntil = null;
+        } else {
+          _stalledUntil = t.add(stallPause);
+        }
+      }
+    } on RateLimited {
+      if (gen == _pagesGen) _rateLimitedUntil = now().add(rateLimitBackoff);
+    } on DeparturesUnavailable {
+      // keep what is shown; "Show more" stays to try again
+    } finally {
+      if (gen == _pagesGen) loadingMore = false;
+      _notify();
+    }
+  }
+
+  void _clearPages() {
+    _pages.clear();
+    _stalledUntil = null;
+    _pagesGen++;
+    loadingMore = false;
+  }
+
   /// Destinations on the board (API order), plus selected ones with no train right now.
   List<String> get destinations {
     final out = <String>[];
-    for (final d in board?.services ?? const <Departure>[]) {
+    for (final d in services) {
       if (!out.contains(d.destination)) out.add(d.destination);
     }
     for (final f in filters) {
@@ -116,7 +217,7 @@ class AppController extends ChangeNotifier {
   }
 
   List<Departure> get visibleServices {
-    final s = board?.services ?? const <Departure>[];
+    final s = services;
     return filters.isEmpty ? s : s.where((d) => filters.contains(d.destination)).toList();
   }
 
@@ -167,6 +268,7 @@ class AppController extends ChangeNotifier {
   Future<void> retry() async {
     if (retrying) return;
     retrying = true;
+    _clearPages(); // pull-to-refresh starts again from the next trains
     _notify();
     try {
       await Future.wait([
@@ -281,6 +383,7 @@ class AppController extends ChangeNotifier {
     station = s;
     _stationGen++;
     board = null;
+    _clearPages();
     _lastFailed = false;
     _prefs.setString(_lastStationKey, s.crs);
     filters = _savedFilters(s.crs);
@@ -333,7 +436,7 @@ class AppController extends ChangeNotifier {
     if (b != null) {
       board = b;
       _lastFailed = false;
-      _rateLimitedUntil = null;
+      if (!rateLimited) _rateLimitedUntil = null; // a 429 meanwhile (e.g. a later page) still holds
     } else {
       _lastFailed = true;
       if (limited) _rateLimitedUntil = now().add(rateLimitBackoff);

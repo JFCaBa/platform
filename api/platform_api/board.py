@@ -90,17 +90,26 @@ def _service(raw: dict) -> dict:
 BUS_NOTICE = "Replacement buses are running from this station."
 
 
-def to_board(darwin: dict, crs: str, attribution: str, now: datetime) -> dict:
+BASE_ROWS = 50  # rows asked for the base board (offset 0)
+
+
+def to_board(darwin: dict, crs: str, attribution: str, now: datetime, *, offset: int = 0,
+             rows: int = BASE_ROWS) -> dict:
+    """`complete`: fewer than `rows` came back, so the whole 120-min window is covered."""
     messages = [strip_html(m.get("Value", "")) for m in darwin.get("nrccMessages") or []]
     if darwin.get("busServices"):
         messages.insert(0, BUS_NOTICE)
+    services = [_service(s) for s in darwin.get("trainServices") or []]
     return {
         "crs": crs,
         "name": darwin.get("locationName") or crs,
         "generatedAt": _utc_iso(darwin.get("generatedAt"), now),
         "nrccMessages": [m for m in messages if m],
         "attribution": attribution,
-        "services": [_service(s) for s in darwin.get("trainServices") or []],
+        "timeOffset": offset,
+        # numRows counts every service on the board, buses and ferries included.
+        "complete": len(services) + len(darwin.get("busServices") or []) + len(darwin.get("ferryServices") or []) < rows,
+        "services": services,
     }
 
 

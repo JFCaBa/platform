@@ -35,6 +35,12 @@ x-apikey: <consumer key>
 - `GetDepartureBoard` (≈11 KB for 20 rows, ~0.15 s from the VPS) has every field we need.
   `GetDepBoardWithDetails` adds calling points (≈43 KB); not used.
 - Other params: `filterCrs`, `filterType` (`to`/`from`), `timeOffset`, `timeWindow`.
+- Later trains (app "Show more", since 18-11-2026): `/departures/{CRS}/{OFFSET}` asks Darwin
+  `numRows=150&timeWindow=120&timeOffset=OFFSET`. `timeOffset` is -120..119 and `numRows` at most
+  150, so about 4 h ahead is the furthest reach. The app asks multiples of 15 (plus 119) so nginx
+  entries (60 s) are shared; an exact minute only when a page covered under 15 min. Pages are
+  snapshots: the 30 s refresh only re-asks the base board. Plan:
+  `docs/superpowers/plans/2026-11-18-load-more.md`.
 - Errors seen: unknown CRS (`ZZZ`) → **400**; bad/wrong key → **401**
   `{"fault":{"faultstring":"Invalid ApiKey",...}}`; key for another product → 401
   `InvalidApiKeyForGivenResource`.

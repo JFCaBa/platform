@@ -192,6 +192,45 @@ class ServerTest(unittest.TestCase):
         self.get("/departures/KGX")
         self.assertIn("numRows=50", self.darwin.paths[0])
 
+    def test_base_board_has_offset_0_and_complete(self):
+        status, _, body = self.get("/departures/KGX")
+        b = json.loads(body)
+        self.assertEqual((b["timeOffset"], b["complete"]), (0, True))  # fixture has 20 < 50 rows
+
+    def test_later_page_asks_darwin_with_offset_and_150_rows(self):
+        status, headers, body = self.get("/departures/KGX/45")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["cache-control"], "max-age=60")
+        path = self.darwin.paths[0]
+        self.assertIn("/KGX?", path)
+        self.assertIn("numRows=150", path)
+        self.assertIn("timeWindow=120", path)
+        self.assertIn("timeOffset=45", path)
+        b = json.loads(body)
+        self.assertEqual((b["timeOffset"], b["complete"]), (45, True))
+        self.assertEqual(len(b["services"]), 20)
+
+    def test_later_page_offsets_1_to_119(self):
+        for off in ["1", "9", "15", "99", "119"]:
+            self.assertEqual(self.get(f"/departures/KGX/{off}")[0], 200, off)
+
+    def test_bad_offset_400(self):
+        for off in ["0", "120", "07", "-5", "abc", "1.5", "", "200"]:
+            status, _, body = self.get(f"/departures/KGX/{off}")
+            self.assertEqual(status, 400, off)
+            self.assertEqual(json.loads(body), {"error": "bad offset"}, off)
+        self.assertEqual(self.get("/departures/KGX/30/1")[0], 400)
+        self.assertEqual(self.darwin.requests, 0)
+
+    def test_later_page_bad_or_unknown_crs(self):
+        self.assertEqual(self.get("/departures/kgx/30")[0], 400)
+        self.assertEqual(self.get("/departures/ZZZ/30")[0], 404)
+        self.assertEqual(self.darwin.requests, 0)
+
+    def test_later_page_429_passed_through(self):
+        self.darwin.mode = "429"
+        self.assertEqual(self.get("/departures/KGX/30")[0], 429)
+
     def test_concurrency_limit_502(self):
         self.darwin.mode = "slow"
         results = []

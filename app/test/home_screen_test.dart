@@ -64,6 +64,59 @@ void main() {
     expect(find.text('No departures in the next 2 hours'), findsOneWidget);
   });
 
+  testWidgets('Show more fetches later trains; then says how far it reached', (tester) async {
+    // 09:14 UTC = 10:14 London (BST).
+    server.boards['KGX'] = boardJson('KGX', clockNow, timeOffset: 0, complete: true,
+        services: [service('10:15', serviceId: 'a', platform: '9')]);
+    server.boards['KGX/119'] = boardJson('KGX', clockNow, timeOffset: 119, complete: true,
+        services: [service('12:30', serviceId: 'z', destination: 'York')]);
+    await pumpHome(tester);
+    expect(find.textContaining('York'), findsNothing);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Show more'));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump();
+    expect(find.textContaining('York'), findsWidgets);
+    expect(find.text('Show more'), findsNothing);
+    expect(find.text('No more departures in the next 4 hours'), findsOneWidget);
+  });
+
+  testWidgets('a train only on a later page cannot be followed yet', (tester) async {
+    server.boards['KGX'] = boardJson('KGX', clockNow, timeOffset: 0, complete: true,
+        services: [service('10:15', serviceId: 'a')]);
+    server.boards['KGX/119'] = boardJson('KGX', clockNow, timeOffset: 119, complete: true,
+        services: [service('12:30', serviceId: 'z', destination: 'York')]);
+    final f = FakeFollower();
+    await pumpHome(tester, follower: f);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Show more'));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump();
+    await tester.longPress(find.text('12:30'));
+    await tester.pump();
+    expect(f.current, isNull);
+    await tester.longPress(find.text('10:15'));
+    await tester.pump();
+    expect(f.current?.std, '10:15');
+  });
+
+  testWidgets('scrolling to the end fetches later trains', (tester) async {
+    server.boards['KGX'] = boardJson('KGX', clockNow, timeOffset: 0, complete: false, services: [
+      for (var i = 0; i < 40; i++) service('10:${(15 + i).toString().padLeft(2, '0')}', serviceId: 's$i'),
+    ]);
+    server.boards['KGX/30'] = boardJson('KGX', clockNow, timeOffset: 30, complete: false, services: []);
+    await pumpHome(tester);
+    expect(server.requested.contains('KGX/30'), isFalse);
+    await tester.runAsync(() async {
+      await tester.drag(find.byType(ListView), const Offset(0, -10000));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump();
+    expect(server.requested.contains('KGX/30'), isTrue); // last train 10:54 is 40 min ahead
+  });
+
   testWidgets('keeps API order', (tester) async {
     server.boards['KGX'] = boardJson('KGX', clockNow, services: [
       service('23:58', etd: '00:03', destination: 'Peterborough'),

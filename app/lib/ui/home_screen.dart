@@ -43,6 +43,23 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   AppController get controller => widget.controller;
 
+  /// Pixels from the end of the list at which the next trains are fetched.
+  static const _loadMoreWithin = 300.0;
+
+  late final ScrollController _scroll = ScrollController()..addListener(_onScroll);
+
+  /// Near the end of the list: fetch later trains (the controller runs one fetch at a time).
+  void _onScroll() {
+    final p = _scroll.position;
+    if (p.hasContentDimensions && p.extentAfter < _loadMoreWithin && controller.hasMore) controller.loadMore();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   Future<void> _openPrivacy(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -89,6 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return RefreshIndicator(
       onRefresh: c.retry,
       child: ListView(
+        controller: _scroll,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
@@ -174,7 +192,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
   Widget _row(BuildContext context, Board b, Departure d) {
-    final follower = widget.follower;
+    // Following polls the next-trains board: a train only on a later page can be followed once
+    // the base board lists it.
+    final follower = controller.onBaseBoard(d) ? widget.follower : null;
     final current = follower?.current;
     final followed = current != null && current.crs == b.crs && current.matches(d);
     final t = FollowedTrain(crs: b.crs, std: d.std, destination: d.destination, serviceId: d.serviceId);
@@ -194,6 +214,29 @@ class _HomeScreenState extends State<HomeScreen> {
     ]);
   }
 
+  /// End of the list: "Show more" (scrolling near it also loads), a spinner while loading, or why
+  /// there is nothing further.
+  Widget _more(BuildContext context) {
+    final c = controller;
+    final small = Theme.of(context).textTheme.bodySmall;
+    if (c.loadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Center(child: SizedBox.square(dimension: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    if (c.hasMore) {
+      return Center(
+          child: TextButton(onPressed: c.rateLimited ? null : c.loadMore, child: const Text('Show more')));
+    }
+    if (c.services.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Text(c.reachedEnd ? 'No more departures in the next 4 hours' : "That's as far ahead as we can show",
+          textAlign: TextAlign.center, style: small),
+    );
+  }
+
   List<Widget> _board(BuildContext context, Board b) {
     final c = controller;
     final updated = 'Last updated ${londonHhmm(b.generatedAt)}';
@@ -203,16 +246,17 @@ class _HomeScreenState extends State<HomeScreen> {
         _Banner(updated, onRetry: c.retrying || c.rateLimited ? null : c.retry)
       else if (c.stale && !c.rateLimited)
         _Banner(updated, onRetry: c.retrying ? null : c.retry),
-      if (b.nrccMessages.isNotEmpty) _Alerts(b.nrccMessages, initiallyOpen: b.services.isEmpty),
+      if (b.nrccMessages.isNotEmpty) _Alerts(b.nrccMessages, initiallyOpen: c.services.isEmpty),
       if (!c.expired) ...[
         _FilterChips(destinations: c.destinations, selected: c.filters, onToggle: c.toggleFilter, onClear: c.clearFilters),
         const Divider(),
-        if (b.services.isEmpty)
+        if (c.services.isEmpty)
           const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('No departures in the next 2 hours'))
         else if (c.visibleServices.isEmpty)
           const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('No trains to these destinations right now'))
         else
           for (final d in c.visibleServices) _row(context, b, d),
+        _more(context),
       ],
     ];
   }

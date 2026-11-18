@@ -47,6 +47,20 @@ class BoardTest(unittest.TestCase):
         self.assertEqual(b["services"][0]["destination"], first["destination"][0]["locationName"])
         self.assertTrue(all("<" not in m for m in b["nrccMessages"]))
 
+    def test_complete_when_fewer_rows_than_asked(self):
+        raw = board_with(svc(), svc())
+        b = to_board(raw, "KGX", ATTR, NOW)
+        self.assertEqual((b["timeOffset"], b["complete"]), (0, True))
+        b = to_board(raw, "KGX", ATTR, NOW, offset=30, rows=2)
+        self.assertEqual((b["timeOffset"], b["complete"]), (30, False))
+
+    def test_buses_and_ferries_count_towards_the_rows(self):
+        raw = board_with(svc())
+        raw["busServices"] = [{"std": "10:00"}]
+        raw["ferryServices"] = [{"std": "10:05"}]
+        self.assertFalse(to_board(raw, "KGX", ATTR, NOW, offset=30, rows=3)["complete"])
+        self.assertTrue(to_board(raw, "KGX", ATTR, NOW, offset=30, rows=4)["complete"])
+
     def test_generated_at_with_other_offset_is_utc(self):
         raw = board_with()
         raw["generatedAt"] = "2026-07-01T10:00:05.1+01:00"

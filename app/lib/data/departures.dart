@@ -75,6 +75,8 @@ class Board {
     required this.nrccMessages,
     required this.attribution,
     required this.services,
+    this.timeOffset = 0,
+    this.complete = false,
   });
 
   final String crs;
@@ -86,6 +88,13 @@ class Board {
   final String attribution;
   final List<Departure> services;
 
+  /// Minutes ahead this board starts (0 = the base board, later pages 1..119).
+  final int timeOffset;
+
+  /// Fewer rows than asked: the whole 120-min window is listed. False from an older API, which
+  /// only makes the app ask for the next page sooner.
+  final bool complete;
+
   factory Board.fromJson(Map<String, dynamic> j) => Board(
         crs: j['crs'] as String,
         name: j['name'] as String?,
@@ -93,6 +102,8 @@ class Board {
         nrccMessages: [for (final m in j['nrccMessages'] as List? ?? const []) m as String],
         attribution: j['attribution'] as String,
         services: [for (final s in j['services'] as List) Departure.fromJson(s as Map<String, dynamic>)],
+        timeOffset: j['timeOffset'] as int? ?? 0,
+        complete: j['complete'] as bool? ?? false,
       );
 }
 
@@ -121,11 +132,13 @@ class DeparturesClient {
   final String baseUrl;
   final Duration timeout;
 
-  Future<Board> fetch(String crs) async {
+  /// The board from [offset] minutes ahead (0 = next trains; later pages 1..119).
+  Future<Board> fetch(String crs, {int offset = 0}) async {
+    final path = '$baseUrl/departures/${Uri.encodeComponent(crs)}${offset == 0 ? '' : '/$offset'}';
     final http.Response resp;
     try {
       resp = await _client
-          .get(Uri.parse('$baseUrl/departures/${Uri.encodeComponent(crs)}'), headers: {'User-Agent': userAgent})
+          .get(Uri.parse(path), headers: {'User-Agent': userAgent})
           .timeout(timeout);
     } catch (e) {
       throw DeparturesUnavailable(e);

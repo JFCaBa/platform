@@ -1,4 +1,5 @@
-"""Platform API: GET /departures/{CRS} → next departures (Darwin, reshaped), GET /health,
+"""Platform API: GET /departures/{CRS} → next departures (Darwin, reshaped),
+GET /departures/{CRS}/{OFFSET} → the trains from OFFSET (1..119) minutes ahead, GET /health,
 POST/DELETE /follow → push alerts (APNs) for one followed train per device.
 
 Privacy: requests are not logged. Logged: Darwin failures (station code + reason),
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Collection, TextIO
 
 from .apns import Apns
-from .board import HHMM, to_board, to_stops
+from .board import BASE_ROWS, HHMM, to_board, to_stops
 from .follow import MAX_DURATION, FollowStore, Poller, find_followed
 
 DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
@@ -36,7 +37,11 @@ SERVICE_URL = ("https://api1.raildata.org.uk/1010-service-details1_2"
 STATIONS_URL = "https://jfcaba.github.io/platform/stations.json"
 BUNDLED_STATIONS = Path(__file__).parent / "stations.json"
 ATTRIBUTION = "Data: National Rail"
-QUERY = "?numRows=50&timeWindow=120"  # 20 rows cover only ~15 min at the busiest stations
+QUERY = f"?numRows={BASE_ROWS}&timeWindow=120"  # 20 rows cover only ~15 min at the busiest stations
+# Later pages: Darwin's maximum rows, so even the busiest station's page covers well over 15 min.
+LATER_ROWS = 150
+LATER_PATH = re.compile(r"^/departures/([^/]*)/([^/]*)$")
+OFFSET_RE = re.compile(r"^(?:[1-9]|[1-9][0-9]|1[01][0-9])$")  # 1..119, Darwin's timeOffset range
 MAX_BODY = 1 << 20
 CRS_PATH = re.compile(r"^/departures/(.+)$")
 CRS_RE = re.compile(r"^[A-Z]{3}$")
@@ -236,10 +241,21 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             sm = SERVICE_PATH.match(self.path)
             if sm:
                 return self.service(sm.group(1))
-            m = CRS_PATH.match(self.path)
-            if not m:
-                return self.send_json(404, {"error": "not found"})
-            crs = m.group(1)
+            offset, rows, query, cache = 0, BASE_ROWS, QUERY, "max-age=30"
+            lm = LATER_PATH.match(self.path)
+            if lm:
+                crs = lm.group(1)
+                if CRS_RE.match(crs) and not OFFSET_RE.match(lm.group(2)):
+                    return self.send_json(400, {"error": "bad offset"})
+                if CRS_RE.match(crs):
+                    offset, rows = int(lm.group(2)), LATER_ROWS
+                    query = f"?numRows={rows}&timeWindow=120&timeOffset={offset}"
+                    cache = "max-age=60"  # snapshots of later trains; nginx keeps them 60 s
+            else:
+                m = CRS_PATH.match(self.path)
+                if not m:
+                    return self.send_json(404, {"error": "not found"})
+                crs = m.group(1)
             if not CRS_RE.match(crs):
                 return self.send_json(400, {"error": "bad crs"})
             if crs not in self.server.stations:
@@ -249,8 +265,8 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 # backs off for minutes on a real Darwin 429.
                 return self.send_json(502, {"error": "busy"})
             try:
-                raw = fetch_darwin(f"{darwin_url}/{crs}{QUERY}", api_key, deadline_s)
-                board = to_board(raw, crs, attribution, datetime.now(timezone.utc))
+                raw = fetch_darwin(f"{darwin_url}/{crs}{query}", api_key, deadline_s)
+                board = to_board(raw, crs, attribution, datetime.now(timezone.utc), offset=offset, rows=rows)
             except Upstream as e:
                 log.write(f"upstream {crs} {e.status}\n")
                 if e.status == 429:
@@ -263,7 +279,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 return self.send_json(502, {"error": "upstream"})
             finally:
                 slots.release()
-            self.send_json(200, board, cache="max-age=30")
+            self.send_json(200, board, cache=cache)
 
         def read_json(self) -> tuple[bool, object]:
             """(ok, value) for a JSON body of exactly Content-Length bytes, at most 4 KB. On any

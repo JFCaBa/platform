@@ -37,8 +37,14 @@ Map<String, dynamic> service(String std,
     };
 
 String boardJson(String crs, DateTime generatedAt,
-        {List<Map<String, dynamic>>? services, List<String> nrcc = const [], String? name}) =>
+        {List<Map<String, dynamic>>? services,
+        List<String> nrcc = const [],
+        String? name,
+        int? timeOffset,
+        bool? complete}) =>
     jsonEncode({
+      'timeOffset': ?timeOffset,
+      'complete': ?complete,
       'crs': crs,
       'name': name ?? '$crs board',
       'generatedAt': generatedAt.toUtc().toIso8601String().replaceFirst(RegExp(r'\.\d+'), ''),
@@ -58,7 +64,7 @@ class FakeServer {
   /// Server time used for generatedAt when no board is set for a CRS.
   DateTime Function() now;
 
-  final boards = <String, String>{}; // CRS -> body
+  final boards = <String, String>{}; // CRS (or "CRS/OFFSET" for later pages) -> body
   final status = <String, int>{}; // CRS -> HTTP status (default 200)
   final holds = <String, Completer<void>>{}; // CRS -> gate
   bool apiFails = false;
@@ -73,7 +79,9 @@ class FakeServer {
       if (stationsFail) throw const SocketException('offline');
       return okJson(fixture('stations.json'));
     }
-    final crs = req.url.pathSegments.last;
+    final seg = req.url.pathSegments;
+    final i = seg.indexOf('departures');
+    final crs = i >= 0 && seg.length > i + 2 ? '${seg[i + 1]}/${seg[i + 2]}' : seg.last;
     requested.add(crs);
     final gate = holds[crs];
     if (gate != null) await gate.future;

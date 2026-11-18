@@ -5,11 +5,13 @@ import 'package:platform_app/app_controller.dart';
 import 'package:platform_app/data/departures.dart';
 import 'package:platform_app/data/json_cache.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 
 import 'support.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(tzdata.initializeTimeZones);
   late Directory dir;
   late FakeServer server;
   late FakeLocation location;
@@ -263,6 +265,163 @@ void main() {
       expect(server.requested.length, asked + 1);
       server.release('KGX');
       await r;
+    });
+  });
+
+  group('later pages', () {
+    // clockNow 10:14 GMT. Busy base: 50 rows that only reach 10:55 (41 min).
+    String busyBase({bool complete = false}) => boardJson('KGX', clockNow, complete: complete, timeOffset: 0, services: [
+          service('10:15', serviceId: 'a'),
+          service('10:55', serviceId: 'b'),
+        ]);
+
+    test('pages follow the last train and merge without duplicates', () async {
+      server.boards['KGX'] = busyBase();
+      server.boards['KGX/30'] = boardJson('KGX', clockNow, timeOffset: 30, complete: false, services: [
+        service('10:55', serviceId: 'b'),
+        service('11:30', serviceId: 'c', destination: 'Leeds'),
+      ]);
+      final c = await startedAt(nearKingsCross);
+      expect(c.hasMore, isTrue);
+      await c.loadMore();
+      expect(server.requested.last, 'KGX/30');
+      expect(c.services.map((d) => d.serviceId), ['a', 'b', 'c']);
+      expect(c.destinations, ['Cambridge', 'Leeds']);
+      server.boards['KGX/75'] = boardJson('KGX', clockNow, timeOffset: 75, complete: false, services: []);
+      await c.loadMore();
+      expect(server.requested.last, 'KGX/75'); // 11:30 is 76 min ahead
+    });
+
+    test('a complete base jumps to 119; a complete 119 page is the end', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      server.boards['KGX/119'] =
+          boardJson('KGX', clockNow, timeOffset: 119, complete: true, services: [service('13:00', serviceId: 'z')]);
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      expect(server.requested.last, 'KGX/119');
+      expect(c.hasMore, isFalse);
+      expect(c.reachedEnd, isTrue);
+      await c.loadMore();
+      expect(server.requested.where((r) => r == 'KGX/119'), hasLength(1));
+    });
+
+    test('the 30 s refresh fetches only the base; pages are kept', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      server.boards['KGX/119'] = boardJson('KGX', clockNow, timeOffset: 119, complete: true, services: [service('13:00', serviceId: 'z')]);
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      timers.fireActive();
+      await settle();
+      expect(server.requested.sublist(server.requested.length - 2), ['KGX/119', 'KGX']);
+      expect(c.services.last.serviceId, 'z');
+    });
+
+    test('pull to refresh and a new station start again from the next trains', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      server.boards['KGX/119'] = boardJson('KGX', clockNow, timeOffset: 119, complete: true, services: [service('13:00', serviceId: 'z')]);
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      await c.retry();
+      expect(c.services.map((d) => d.serviceId), ['a', 'b']);
+      expect(c.hasMore, isTrue);
+      await c.loadMore();
+      c.chooseStation('BHM');
+      expect(c.services, isEmpty);
+    });
+
+    test('an hour later the next page counts from now, not from the old page', () async {
+      server.boards['KGX'] = busyBase();
+      server.boards['KGX/30'] = boardJson('KGX', clockNow, timeOffset: 30, complete: false, services: [
+        service('11:30', serviceId: 'c'),
+      ]);
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      expect(server.requested.last, 'KGX/30');
+      clockNow = clockNow.add(const Duration(hours: 1)); // 11:14
+      server.boards['KGX'] = boardJson('KGX', clockNow, timeOffset: 0, complete: false, services: [
+        service('11:15', serviceId: 'd'),
+        service('11:55', serviceId: 'e'),
+      ]);
+      timers.fireActive();
+      await settle();
+      server.boards['KGX/30'] = boardJson('KGX', clockNow, timeOffset: 30, complete: false, services: []);
+      await c.loadMore();
+      expect(server.requested.last, 'KGX/30'); // 11:55 is 41 min ahead now: 30, no gap
+    });
+
+    test('a page that adds nothing (same cached answer) pauses loading for 15 min', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      final page = boardJson('KGX', clockNow, timeOffset: 119, complete: false, services: [service('12:20', serviceId: 'z')]);
+      server.boards['KGX/119'] = page;
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      clockNow = clockNow.add(const Duration(minutes: 2)); // the page now starts 117 min ahead
+      expect(c.hasMore, isTrue);
+      await c.loadMore(); // nginx hands back the same page
+      expect(server.requested.where((r) => r == 'KGX/119'), hasLength(2));
+      expect(c.services.where((d) => d.serviceId == 'z'), hasLength(1));
+      expect(c.hasMore, isFalse);
+      await c.loadMore();
+      expect(server.requested.where((r) => r == 'KGX/119'), hasLength(2));
+      clockNow = clockNow.add(const Duration(minutes: 15));
+      server.boards['KGX'] = boardJson('KGX', clockNow, timeOffset: 0, complete: true, services: [service('10:40', serviceId: 'n')]);
+      timers.fireActive(); // the base keeps being refreshed meanwhile
+      await settle();
+      expect(c.hasMore, isTrue);
+    });
+
+    test('a 429 on a page holds even if a base refresh answers after it', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      server.status['KGX/119'] = 429;
+      final c = await startedAt(nearKingsCross);
+      server.hold('KGX');
+      timers.fireActive(); // base refresh in flight
+      await settle();
+      await c.loadMore();
+      expect(c.rateLimited, isTrue);
+      server.release('KGX');
+      await settle();
+      expect(c.rateLimited, isTrue);
+    });
+
+    test('one fetch at a time', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      final c = await startedAt(nearKingsCross);
+      server.hold('KGX/119');
+      final first = c.loadMore();
+      await settle();
+      expect(c.loadingMore, isTrue);
+      c.loadMore();
+      await settle();
+      server.release('KGX/119');
+      await first;
+      expect(server.requested.where((r) => r == 'KGX/119'), hasLength(1));
+      expect(c.loadingMore, isFalse);
+    });
+
+    test('a failed page keeps the list and can be tried again', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      server.status['KGX/119'] = 503;
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      expect(c.services.map((d) => d.serviceId), ['a', 'b']);
+      expect(c.hasMore, isTrue);
+      expect(c.loadingMore, isFalse);
+    });
+
+    test('a late page for the previous station is dropped', () async {
+      server.boards['KGX'] = busyBase(complete: true);
+      server.boards['KGX/119'] = boardJson('KGX', clockNow, timeOffset: 119, complete: true, services: [service('13:00', serviceId: 'z')]);
+      final c = await startedAt(nearKingsCross);
+      server.hold('KGX/119');
+      final f = c.loadMore();
+      await settle();
+      c.chooseStation('BHM');
+      server.release('KGX/119');
+      await f;
+      await settle();
+      expect(c.services.where((d) => d.serviceId == 'z'), isEmpty);
+      expect(c.loadingMore, isFalse);
     });
   });
 
