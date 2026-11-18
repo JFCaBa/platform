@@ -140,7 +140,7 @@ class AppController extends ChangeNotifier {
     final s = services;
     return nextOffset(
       prevStart: startIn(last, now()),
-      prevComplete: last.complete,
+      prevEnd: last.complete ? endIn(last, now()) : null,
       lastMinutes: s.isEmpty ? null : minutesUntil(s.last.std, now()),
     );
   }

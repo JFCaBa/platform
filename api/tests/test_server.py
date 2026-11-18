@@ -207,7 +207,7 @@ class ServerTest(unittest.TestCase):
         self.assertIn("timeWindow=120", path)
         self.assertIn("timeOffset=45", path)
         b = json.loads(body)
-        self.assertEqual((b["timeOffset"], b["complete"]), (45, True))
+        self.assertEqual((b["timeOffset"], b["complete"], b["window"]), (45, True, 75))
         self.assertEqual(len(b["services"]), 20)
 
     def test_later_page_offsets_1_to_119(self):

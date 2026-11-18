@@ -54,6 +54,11 @@ class BoardTest(unittest.TestCase):
         b = to_board(raw, "KGX", ATTR, NOW, offset=30, rows=2)
         self.assertEqual((b["timeOffset"], b["complete"]), (30, False))
 
+    def test_window_is_what_darwin_lists(self):
+        raw = board_with(svc())
+        self.assertEqual([to_board(raw, "KGX", ATTR, NOW, offset=o)["window"] for o in (0, 1, 45, 118, 119)],
+                         [120, 119, 75, 2, 120])
+
     def test_buses_and_ferries_count_towards_the_rows(self):
         raw = board_with(svc())
         raw["busServices"] = [{"std": "10:00"}]

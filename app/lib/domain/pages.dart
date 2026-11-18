@@ -64,10 +64,10 @@ List<Departure> mergeServices(Board base, List<Board> pages, DateTime nowUtc) {
 /// Minutes from now to where [b] starts: Darwin's offset counts from when the board was made.
 int startIn(Board b, DateTime nowUtc) => b.timeOffset - nowUtc.difference(b.generatedAt).inMinutes;
 
-/// Minutes from now to the end of what [b] lists: its whole 120-min window when complete, else
+/// Minutes from now to the end of what [b] lists: its whole window when complete, else
 /// its last train. Null for an incomplete board with no trains.
 int? endIn(Board b, DateTime nowUtc) {
-  if (b.complete) return startIn(b, nowUtc) + 120;
+  if (b.complete) return startIn(b, nowUtc) + b.window;
   int? last;
   for (final d in b.services) {
     final m = minutesUntil(d.std, nowUtc);
@@ -98,14 +98,32 @@ int coveredEnd(Board base, List<Board> pages, DateTime nowUtc) => _chain(base, p
   return (out, covered);
 }
 
+/// Furthest Darwin lists, in minutes from now: offset 119 plus its 120-min window.
+const maxReach = maxOffset + 120;
+
 /// Offset of the next page, or null when Darwin cannot reach further.
-/// [prevStart]/[prevComplete]: the last board loaded, its start in minutes from now
-/// ([startIn]; the base is about 0). [lastMinutes]: minutes from now to the last train listed.
-int? nextOffset({required int prevStart, required bool prevComplete, required int? lastMinutes}) {
+/// [prevStart]: where the last board loaded starts, in minutes from now ([startIn]; the base is
+/// about 0). [prevEnd]: where it ends ([endIn]) when it is complete, else null.
+/// [lastMinutes]: minutes from now to the last train listed.
+///
+/// Offsets 1..118 only list up to now + 120 ([darwinWindow]); beyond that only 119 reaches.
+int? nextOffset({required int prevStart, required int? prevEnd, required int? lastMinutes}) {
   if (prevStart >= maxOffset) return null;
   final m = lastMinutes;
-  if (prevComplete || m == null) return _cap(prevStart + 120);
-  final q = _cap(m ~/ offsetStep * offsetStep);
+  // Rows taken by buses/ferries but no train listed: the end is unknown, step on 15 min.
+  if (prevEnd == null && m == null) return _cap(prevStart + offsetStep);
+  if (prevEnd != null) {
+    final end = prevEnd;
+    if (end < maxOffset) {
+      // An aged complete page ends short of +119 now: fill up to now + 120 first (no gap).
+      final q = _cap(end ~/ offsetStep * offsetStep);
+      return q > prevStart ? q : _cap(end);
+    }
+    // All listed up to its end: the next trains are past now + 120, where only 119 reaches.
+    // Worth asking only if that adds a real stretch (an aged 119 page gains just minutes).
+    return maxReach - end >= offsetStep ? maxOffset : null;
+  }
+  final q = _cap(m! ~/ offsetStep * offsetStep);
   if (q > prevStart) return q;
   // A page covering under 15 min: ask from the last train's own minute (overlap, no gap).
   final exact = _cap(m);

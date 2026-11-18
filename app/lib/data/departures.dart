@@ -77,6 +77,7 @@ class Board {
     required this.services,
     this.timeOffset = 0,
     this.complete = false,
+    this._window,
   });
 
   final String crs;
@@ -91,7 +92,11 @@ class Board {
   /// Minutes ahead this board starts (0 = the base board, later pages 1..119).
   final int timeOffset;
 
-  /// Fewer rows than asked: the whole 120-min window is listed. False from an older API, which
+  /// Minutes Darwin lists from [timeOffset] (see [darwinWindow]).
+  int get window => _window ?? darwinWindow(timeOffset);
+  final int? _window;
+
+  /// Fewer rows than asked: the whole [window] is listed. False from an older API, which
   /// only makes the app ask for the next page sooner.
   final bool complete;
 
@@ -104,8 +109,14 @@ class Board {
         services: [for (final s in j['services'] as List) Departure.fromJson(s as Map<String, dynamic>)],
         timeOffset: j['timeOffset'] as int? ?? 0,
         complete: j['complete'] as bool? ?? false,
+        window: j['window'] as int?,
       );
 }
+
+/// Minutes Darwin lists from [offset] (measured 18-11-2026): for offsets 1..118 the board stops at
+/// now + 120 min whatever the window asked; offsets 0 and 119 get the full 120. The API sends it
+/// as `window`; this is the fallback.
+int darwinWindow(int offset) => offset > 0 && offset < 119 ? 120 - offset : 120;
 
 /// How long to wait after a 429.
 const rateLimitBackoff = Duration(minutes: 5);

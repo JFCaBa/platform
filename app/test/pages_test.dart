@@ -103,37 +103,58 @@ void main() {
     });
   });
 
+  group('darwinWindow', () {
+    test('offsets 1..118 stop at now + 120; 0 and 119 get 120', () {
+      expect([0, 1, 45, 90, 118, 119].map(darwinWindow), [120, 119, 75, 30, 2, 120]);
+    });
+  });
+
   group('nextOffset', () {
     test('busy station: floor of the last train to 15', () {
-      expect(nextOffset(prevStart: 0, prevComplete: false, lastMinutes: 41), 30);
+      expect(nextOffset(prevStart: 0, prevEnd: null, lastMinutes: 41), 30);
     });
-    test('a page that covered its 2 h window jumps to 119', () {
-      expect(nextOffset(prevStart: 0, prevComplete: true, lastMinutes: 100), 119);
+    test('a complete board jumps to 119, the only offset past now + 120', () {
+      expect(nextOffset(prevStart: 0, prevEnd: 120, lastMinutes: 100), 119);
+      expect(nextOffset(prevStart: 90, prevEnd: 120, lastMinutes: 117), 119); // real CLJ, 18-11
+      expect(nextOffset(prevStart: 90, prevEnd: 119, lastMinutes: 117), 119);
+    });
+    test('an aged complete page that ends short of +119 is filled first (no gap)', () {
+      expect(nextOffset(prevStart: 88, prevEnd: 118, lastMinutes: 116), 105); // offset 90, 2 min old
+      expect(nextOffset(prevStart: -10, prevEnd: 80, lastMinutes: 79), 75); // offset 30, 40 min old
+      expect(nextOffset(prevStart: 105, prevEnd: 118, lastMinutes: 117), 118); // floor would not move
+    });
+    test('a 119 page with no trains does not ask 119 again', () {
+      expect(nextOffset(prevStart: 119, prevEnd: null, lastMinutes: null), isNull);
     });
     test('capped at 119', () {
-      expect(nextOffset(prevStart: 90, prevComplete: false, lastMinutes: 140), 119);
+      expect(nextOffset(prevStart: 90, prevEnd: null, lastMinutes: 140), 119);
     });
     test('saturated page (< 15 min): exact minute, no gap', () {
-      expect(nextOffset(prevStart: 30, prevComplete: false, lastMinutes: 41), 41);
+      expect(nextOffset(prevStart: 30, prevEnd: null, lastMinutes: 41), 41);
     });
     test('stops when the last page could not move forward', () {
-      expect(nextOffset(prevStart: 41, prevComplete: false, lastMinutes: 41), isNull);
+      expect(nextOffset(prevStart: 41, prevEnd: null, lastMinutes: 41), isNull);
     });
     test('nothing after 119', () {
-      expect(nextOffset(prevStart: 119, prevComplete: false, lastMinutes: 200), isNull);
+      expect(nextOffset(prevStart: 119, prevEnd: null, lastMinutes: 200), isNull);
+      expect(nextOffset(prevStart: 119, prevEnd: 239, lastMinutes: 200), isNull);
+    });
+    test('an aged complete 119 page asks again only when that adds 15 min', () {
+      expect(nextOffset(prevStart: 110, prevEnd: 230, lastMinutes: 200), isNull);
+      expect(nextOffset(prevStart: 99, prevEnd: 219, lastMinutes: 200), 119);
     });
     test('a page made 40 min ago counts from now', () {
-      // Complete offset-30 page made at 09:20 covered 09:50–11:50 = 110 min from 10:00.
+      // Complete offset-30 page made at 09:20: Darwin listed 09:50–11:20 (window 90) = 80 min from 10:00.
       final page = board(const [], offset: 30, complete: true, at: now.subtract(const Duration(minutes: 40)));
       expect(startIn(page, now), -10);
-      expect(endIn(page, now), 110);
-      expect(nextOffset(prevStart: startIn(page, now), prevComplete: true, lastMinutes: 100), 110);
+      expect(endIn(page, now), 80);
+      expect(nextOffset(prevStart: -10, prevEnd: 80, lastMinutes: 79), 75);
     });
     test('never below 1', () {
-      expect(nextOffset(prevStart: -5, prevComplete: false, lastMinutes: 0), 1);
+      expect(nextOffset(prevStart: -5, prevEnd: null, lastMinutes: 0), 1);
     });
     test('empty list', () {
-      expect(nextOffset(prevStart: 0, prevComplete: false, lastMinutes: null), 119);
+      expect(nextOffset(prevStart: 0, prevEnd: null, lastMinutes: null), 15); // rows full of buses
     });
   });
 }

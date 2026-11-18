@@ -37,7 +37,10 @@ x-apikey: <consumer key>
 - Other params: `filterCrs`, `filterType` (`to`/`from`), `timeOffset`, `timeWindow`.
 - Later trains (app "Show more", since 18-11-2026): `/departures/{CRS}/{OFFSET}` asks Darwin
   `numRows=150&timeWindow=120&timeOffset=OFFSET`. `timeOffset` is -120..119 and `numRows` at most
-  150, so about 4 h ahead is the furthest reach. The app asks multiples of 15 (plus 119) so nginx
+  150, so about 4 h ahead is the furthest reach.
+  **Measured 18-11-2026 (CLJ, KGX, BHM):** for offsets 1..118 Darwin stops the board at now + 120
+  min whatever `timeWindow` says (offset 90 lists only 30 min); offset 119 lists a full 120 min
+  (+119..+239). So past now + 120 only offset 119 reaches; the API sends that as `window`. The app asks multiples of 15 (plus 119) so nginx
   entries (60 s) are shared; an exact minute only when a page covered under 15 min. Pages are
   snapshots: the 30 s refresh only re-asks the base board. Plan:
   `docs/superpowers/plans/2026-11-18-load-more.md`.

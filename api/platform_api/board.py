@@ -93,9 +93,16 @@ BUS_NOTICE = "Replacement buses are running from this station."
 BASE_ROWS = 50  # rows asked for the base board (offset 0)
 
 
+def darwin_window(offset: int) -> int:
+    """Minutes Darwin actually lists from `offset` (measured 18-11-2026): for offsets 1..118 the
+    board stops at now + 120 min whatever timeWindow says; offsets 0 and 119 get the full 120."""
+    return 120 - offset if 0 < offset < 119 else 120
+
+
 def to_board(darwin: dict, crs: str, attribution: str, now: datetime, *, offset: int = 0,
              rows: int = BASE_ROWS) -> dict:
-    """`complete`: fewer than `rows` came back, so the whole 120-min window is covered."""
+    """`complete`: fewer than `rows` came back, so the whole `window` (minutes from `timeOffset`)
+    is listed."""
     messages = [strip_html(m.get("Value", "")) for m in darwin.get("nrccMessages") or []]
     if darwin.get("busServices"):
         messages.insert(0, BUS_NOTICE)
@@ -107,6 +114,7 @@ def to_board(darwin: dict, crs: str, attribution: str, now: datetime, *, offset:
         "nrccMessages": [m for m in messages if m],
         "attribution": attribution,
         "timeOffset": offset,
+        "window": darwin_window(offset),
         # numRows counts every service on the board, buses and ferries included.
         "complete": len(services) + len(darwin.get("busServices") or []) + len(darwin.get("ferryServices") or []) < rows,
         "services": services,
