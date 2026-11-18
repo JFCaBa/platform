@@ -63,6 +63,11 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
   **9 (1.2.0)** (commit 29fe46b). Nueva versión de Alpha con el AAB 9, notas en-GB; vista previa "Ready to release"
   (+7 tablets, +3 TV). Guardada en Publishing overview, **sin enviar** ("Submit 1 change for review" lo pulsa el
   usuario, mejor tras aprobarse la 4). iOS sigue en el build 8 en TestFlight (pubspec ya en 1.2.0+9).
+- 18-11-2026 (tarde): Google **rechaza la 4** por Misleading Claims ("Missing Source Link for Government
+  Information", en la descripción completa). Descripción en-GB con bloque "Sources" (nationalrail.co.uk,
+  raildata.org.uk, NaPTAN en data.gov.uk) + aviso "does not represent any government entity" (listing-en.md),
+  guardada. Publishing overview: 14 cambios (ficha, App content, Alpha 9 (1.2.0), declaración FGS), pendientes de
+  que el usuario pulse "Submit 14 changes for review" → "Send changes for review".
 
 ## Seguir trenes en iOS (servidor, 17-11-2026)
 - Rama feat/ios-follow-push fusionada en main (d715b4c) + CI arreglada (instala requirements.txt). App 1.2.0+8 lista en código, sin subir.
