@@ -80,6 +80,7 @@ shown, 3 NRCC alerts collapsed. Screenshot: `docs/screenshots/kgx.png`.
 - 17-11-2026: prueba real en iPhone 11 (iOS 27.0.1, build release firmada para desarrollo → sandbox): seguido el 21:18 KGX→Ely desde España; a las 21:12 UK le asignan andén 0 y llega el aviso "21:18 to Ely / Platform 0" con la app cerrada. ✅
 
 ## Próxima versión: What Platform iOS 1.2.0 (8) — pendiente (esperando revisión de la 1.1.0)
+- 19-11-2026: la 1.1.0 ya está en la App Store. **Versión 1.2.0 creada** con el build 8: descripción (seguir un tren, "Show more", Sources + aviso), novedades, notas del revisor 1.2.0 (`review-notes-en.md`) y **publicación manual**, guardada. App Privacy: Device ID · Not Linked · App Functionality · sin tracking rellenado; falta que el usuario pulse **Publish** en ese diálogo y luego "Add for Review". Se publica la semana del 23-11-2026.
 - 18-11-2026: build 1.2.0 (8) subido a App Store Connect para TestFlight (seguir trenes por push + "Show more" hasta ~4 h). IPA comprobado: `aps-environment` = production. No asignado a ninguna versión: la 1.1.0 sigue en revisión con el build 7.
 Código en main (1.2.0+8), servidor desplegado con `follow: on`, prueba real OK. Cuando Apple apruebe la 1.1.0:
 1. Archivar 1.2.0 (8) y comprobar que el IPA exportado lleva `aps-environment` = production (el fichero Runner.entitlements dice development; Xcode lo cambia al exportar).

@@ -39,8 +39,27 @@ there is no "What's new" text.
 Tap a train to see its stops, with live expected times.
 New on Android: follow a train. Touch and hold it, or tap "Follow this train", and you'll get a notification if its platform changes, it runs late or it's cancelled — even with the app closed.
 
+## 1.2.0 (both stores)
+
+Description: the bullet "Follow a train (Android): …" becomes, in both stores:
+
+• Follow a train: you get a notification if its platform changes, it runs late or it's cancelled, even with the app closed.
+
+and after "Live departures" add:
+
+• Scroll down or tap "Show more" to see trains up to 4 hours ahead.
+
+What's new in 1.2 (iOS):
+
+Follow a train on iPhone: touch and hold it, or tap "Follow this train", and you'll get a notification if its platform changes, it runs late or it's cancelled — even with the app closed.
+More trains: scroll down or tap "Show more" to see departures up to 4 hours ahead.
+
+What's new in 1.2 (Android):
+
+More trains: scroll down or tap "Show more" to see departures up to 4 hours ahead.
+
 ## Privacy
 
-- App Store: Data Not Collected.
+- App Store: Data Not Collected (1.1.0). From 1.2.0: Identifiers → Device ID · Not Linked to You · App Functionality (push token while following).
 - Play Data safety: no data collected or shared; location used only on the device.
 - Privacy policy and support URL: https://whatplatform.uk/
