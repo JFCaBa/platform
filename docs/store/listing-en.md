@@ -66,7 +66,7 @@ Description: after "Pick any other station in Great Britain by name or code." ad
 
 What's new in 1.3:
 
-The next train, big, at the top: how long until it leaves and its platform.
+The next train, big, at the top: how long until it leaves and its platform. Following a train? That one goes on top.
 Delays in amber and cancelled trains dimmed, so the board reads at a glance.
 "Live" and the time of the last update under the station name.
 Your recent stations, one tap away under the station name.

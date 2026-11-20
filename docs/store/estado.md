@@ -111,3 +111,7 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - Play: AAB 10 en `app/build/app/outputs/bundle/release/app-release.aab` (52 MB). La entrega anterior (Alpha 9,
   ficha, FGS) sigue **In review**: crear la versión de Alpha con el AAB 10 cuando Google la apruebe, para no
   reiniciar la revisión.
+- 20-11-2026 (tarde): **build 11 (1.3.0)**: el tren seguido ocupa la tarjeta grande (commit ce815e2). ASC: versión 1.3.0
+  con el **build 11** y novedades con "Following a train? That one goes on top.", guardada. Play: borrador de Alpha
+  nuevo (release 5) con notas, sin el 10; falta que el usuario arrastre el AAB 11, guarde y luego envíe todo desde
+  Publishing overview (la 9 sigue In review).
