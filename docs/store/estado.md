@@ -96,3 +96,13 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - Condición especial: no revender los datos tal cual; uso comercial solo si se aumentan o integran (la app sí: estación más cercana, filtros, paradas, avisos).
 - No hay cuota publicada ni cabeceras de límite en las respuestas. En la práctica el gateway aplica un "spike arrest" de ~100 peticiones/segundo (error 429 visto por usuarios en dic-2025/ene-2026, openraildata-talk). Cifra antigua de OpenLDBWS (no RDM): 5 millones / 4 semanas.
 - Nuestro máximo: sondeo de avisos ≤ 100/min + paneles detrás de la caché de 30 s de nginx → muy por debajo. Ante 429: app y servidor esperan 5 min.
+
+## 1.3.0 (10) — rediseño (20-11-2026)
+- App: tarjeta grande del próximo tren (minutos, andén grande o "Platform not yet shown"), retrasos en ámbar,
+  cancelados atenuados, "Live · hh:mm:ss" bajo la estación, 3 estaciones recientes (commit 9787f1e).
+- iOS: 1.2.0 ya en la App Store. Build 1.3.0 (10) subido; **versión 1.3.0 creada** con el build 10, descripción
+  (+ "Your recent stations, one tap away.") y novedades (`listing-en.md`), publicación manual, guardada. Capturas: las
+  de la 1.2 (sin la tarjeta nueva). Falta "Add for Review" → enviar (lo pulsa el usuario).
+- Play: AAB 10 en `app/build/app/outputs/bundle/release/app-release.aab` (52 MB). La entrega anterior (Alpha 9,
+  ficha, FGS) sigue **In review**: crear la versión de Alpha con el AAB 10 cuando Google la apruebe, para no
+  reiniciar la revisión.
