@@ -115,3 +115,6 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
   con el **build 11** y novedades con "Following a train? That one goes on top.", guardada. Play: borrador de Alpha
   nuevo (release 5) con notas, sin el 10; falta que el usuario arrastre el AAB 11, guarde y luego envíe todo desde
   Publishing overview (la 9 sigue In review).
+- 20-11-2026: Play Alpha **11 (1.3.0)** guardada (AAB subido por el usuario) y ficha guardada (declaración de IA:
+  "Don't label assets", decidido por el usuario). Publishing overview: **4 cambios sin enviar** (Alpha 11, descripción,
+  capturas, gráfico destacado); la 9 sigue In review. "Submit 4 changes for review" lo pulsa el usuario.
