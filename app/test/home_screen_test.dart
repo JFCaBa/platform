@@ -398,6 +398,48 @@ void main() {
       expect(find.text('Stopped following'), findsOneWidget);
     });
 
+    testWidgets('the followed train takes the large card, back to the first train when unfollowed', (tester) async {
+      final f = FakeFollower()..current = cambridge;
+      await pump(tester, follower: f);
+      final card = find.byType(NextTrainCard);
+      expect(find.descendant(of: card, matching: find.text('Cambridge')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Following')), findsOneWidget);
+      expect(find.widgetWithText(DepartureRow, 'Leeds'), findsOneWidget); // the earlier train is a row
+      await tester.runAsync(f.stop);
+      await tester.pump();
+      expect(find.descendant(of: card, matching: find.text('Leeds')), findsOneWidget);
+      expect(find.text('Following'), findsNothing);
+    });
+
+    testWidgets('a followed train that is cancelled still takes the card', (tester) async {
+      server.boards['KGX'] = boardJson('KGX', clockNow, services: [
+        service('09:20', destination: 'Leeds', serviceId: 'S20'),
+        service('09:30', destination: 'Cambridge', etd: 'Cancelled', cancelled: true, serviceId: 'S30'),
+      ]);
+      await pump(tester, follower: FakeFollower()..current = cambridge);
+      final card = find.byType(NextTrainCard);
+      expect(find.descendant(of: card, matching: find.text('Cambridge')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Cancelled')), findsOneWidget); // the headline, once
+      expect(find.descendant(of: card, matching: find.textContaining('min')), findsNothing);
+      expect(find.descendant(of: card, matching: find.text('Due')), findsNothing);
+    });
+
+    testWidgets('a train followed at another station, or hidden by a filter, does not take the card', (tester) async {
+      final f = FakeFollower()..current = const FollowedTrain(crs: 'BHM', std: '09:30', destination: 'Cambridge');
+      await pump(tester, follower: f);
+      final card = find.byType(NextTrainCard);
+      expect(find.descendant(of: card, matching: find.text('Leeds')), findsOneWidget);
+      f.current = cambridge;
+      f.notifyListeners();
+      await tester.pump();
+      expect(find.descendant(of: card, matching: find.text('Cambridge')), findsOneWidget);
+      final york = find.widgetWithText(FilterChip, 'York');
+      await tester.ensureVisible(york);
+      await tester.tap(york);
+      await tester.pump();
+      expect(find.descendant(of: card, matching: find.text('York')), findsOneWidget);
+    });
+
     testWidgets('long press follows and unfollows', (tester) async {
       final f = FakeFollower();
       await pump(tester, follower: f);
@@ -405,7 +447,9 @@ void main() {
       await tester.pump();
       expect(f.current, cambridge);
       expect(bell, findsOneWidget);
-      expect((tester.getCenter(bell).dy - tester.getCenter(plat('10')).dy).abs(), lessThan(30));
+      // the followed train moves up into the large card, bell and all
+      expect(find.descendant(of: find.byType(NextTrainCard), matching: bell), findsOneWidget);
+      expect(find.descendant(of: find.byType(NextTrainCard), matching: plat('10')), findsOneWidget);
       await tester.longPress(find.text('09:30'));
       await tester.pump();
       expect(f.current, isNull);

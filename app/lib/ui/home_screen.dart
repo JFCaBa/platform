@@ -278,6 +278,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Where the followed train is in [visible], when it is on this station's board (shown as
+  /// followed, see [_row]); null otherwise.
+  int? _followedIndex(Board b, List<Departure> visible) {
+    final current = widget.follower?.current;
+    if (current == null || current.crs != b.crs) return null;
+    final i = visible.indexWhere((d) => current.matches(d) && controller.onBaseBoard(d));
+    return i < 0 ? null : i;
+  }
+
   /// End of the list: "Show more" (scrolling near it also loads), a spinner while loading, or why
   /// there is nothing further.
   Widget _more(BuildContext context) {
@@ -305,8 +314,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final c = controller;
     final updated = 'Last updated ${londonHhmm(b.generatedAt)}';
     final visible = c.visibleServices;
-    // The first train that runs goes in the large card; cancelled ones stay rows.
-    final next = nextTrainIndex(visible);
+    // The large card: the train being followed when this board lists it (even cancelled: that is
+    // news), else the first train that runs; cancelled ones stay rows.
+    final next = _followedIndex(b, visible) ?? nextTrainIndex(visible);
     return [
       if (c.rateLimited) const _Banner('Busy right now. Trying again in a few minutes.'),
       if (c.expired)

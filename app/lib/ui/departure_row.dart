@@ -119,9 +119,12 @@ class NextTrainCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final mins = minutesUntil(d, nowUtc);
+    // A followed train can be cancelled: then that is the headline, not a countdown.
+    final cancelled = isCancelled(d);
+    final mins = cancelled ? null : minutesUntil(d, nowUtc);
+    final headline = cancelled ? 'Cancelled' : (mins == null ? 'Delayed' : waitText(mins));
     final status = statusText(d);
-    final reason = d.delayReason;
+    final reason = cancelled ? d.cancelReason : d.delayReason;
     final muted = theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
     final statusStyle = theme.textTheme.bodyMedium?.copyWith(
       color: _statusColor(context, d),
@@ -146,10 +149,10 @@ class NextTrainCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        mins == null ? 'Delayed' : waitText(mins),
+                        headline,
                         style: theme.textTheme.displaySmall?.copyWith(
                           fontWeight: FontWeight.w800,
-                          color: mins == null ? lateColor(context) : null,
+                          color: cancelled ? scheme.error : (mins == null ? lateColor(context) : null),
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -164,7 +167,7 @@ class NextTrainCard extends StatelessWidget {
                               fontFeatures: const [FontFeature.tabularFigures()],
                             ),
                           ),
-                          if (status.isNotEmpty && status != 'Delayed') Text(status, style: statusStyle),
+                          if (status.isNotEmpty && status != headline) Text(status, style: statusStyle),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -172,7 +175,10 @@ class NextTrainCard extends StatelessWidget {
                       if (d.via != null) Text(d.via!, style: muted),
                       if (d.operator != null) Text(d.operator!, style: muted),
                       if (reason != null)
-                        Text(reason, style: theme.textTheme.bodySmall?.copyWith(color: lateColor(context))),
+                        Text(
+                          reason,
+                          style: theme.textTheme.bodySmall?.copyWith(color: cancelled ? scheme.error : lateColor(context)),
+                        ),
                     ],
                   ),
                 ),
@@ -180,14 +186,23 @@ class NextTrainCard extends StatelessWidget {
                 Column(
                   children: [
                     PlatformBadge(d, large: true),
+                    // Said in words: the followed train can sit above earlier trains in the list.
                     if (followed)
                       Padding(
                         padding: const EdgeInsets.only(top: 10),
-                        child: Icon(
-                          Icons.notifications_active,
-                          size: 22,
-                          color: scheme.primary,
-                          semanticLabel: 'Following',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.notifications_active, size: 18, color: scheme.primary),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Following',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                   ],
