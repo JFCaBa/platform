@@ -113,6 +113,19 @@ void main() {
       expect(c.station!.crs, 'BHM');
     });
 
+    test('recent stations: most recent first, not the one on screen, three at most', () async {
+      final c = await startedAt(nearKingsCross);
+      for (final crs in ['BHM', 'EDB', 'CLJ', 'STP']) {
+        c.chooseStation(crs);
+        await settle();
+      }
+      expect(c.recentStations.map((s) => s.crs), ['CLJ', 'EDB', 'BHM']);
+      c.chooseStation('EDB');
+      await settle();
+      expect(c.recentStations.map((s) => s.crs), ['STP', 'CLJ', 'BHM']);
+      expect((await SharedPreferences.getInstance()).getString('recent_stations'), '["EDB","STP","CLJ","BHM","KGX"]');
+    });
+
     test('useLocation goes back to the nearest station', () async {
       final c = await startedAt(nearKingsCross);
       c.chooseStation('BHM');

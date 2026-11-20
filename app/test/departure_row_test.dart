@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:platform_app/data/departures.dart';
 import 'package:platform_app/ui/departure_row.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 
 Departure dep(String std, {String? etd = 'On time', String? platform, bool cancelled = false, String dest = 'Cambridge',
         String? via, String? delayReason, String? cancelReason}) =>
@@ -27,6 +28,73 @@ Future<void> loadRoboto() async {
 
 void main() {
   setUpAll(loadRoboto);
+  setUpAll(tzdata.initializeTimeZones);
+
+  test('isLate: an expected time or Delayed, never a cancelled train', () {
+    expect(isLate(dep('10:15', etd: 'On time')), isFalse);
+    expect(isLate(dep('10:15', etd: '10:15')), isFalse);
+    expect(isLate(dep('10:15', etd: '10:19')), isTrue);
+    expect(isLate(dep('10:15', etd: 'Delayed')), isTrue);
+    expect(isLate(dep('10:15', etd: 'Cancelled', cancelled: true)), isFalse);
+  });
+
+  test('nextTrainIndex skips cancelled trains', () {
+    expect(nextTrainIndex([dep('10:15', etd: 'Cancelled', cancelled: true), dep('10:20')]), 1);
+    expect(nextTrainIndex([dep('10:15', etd: 'Cancelled', cancelled: true)]), isNull);
+    expect(nextTrainIndex([]), isNull);
+  });
+
+  test('minutesUntil uses London time, the expected time and the nearest day', () {
+    final now = DateTime.utc(2026, 7, 1, 9, 14); // 10:14 BST
+    expect(minutesUntil(dep('10:20'), now), 6);
+    expect(minutesUntil(dep('10:20', etd: '10:31'), now), 17);
+    expect(minutesUntil(dep('10:20', etd: 'Delayed'), now), isNull);
+    expect(minutesUntil(dep('10:20', etd: null), now), 6);
+    expect(minutesUntil(dep('10:13'), now), -1);
+    final late = DateTime.utc(2026, 12, 1, 23, 58); // 23:58 GMT
+    expect(minutesUntil(dep('00:05'), late), 7);
+    expect(minutesUntil(dep('23:50'), DateTime.utc(2026, 12, 2, 0, 2)), -12);
+    // clocks go forward 29-03-2026 at 01:00 GMT: 00:50 GMT to 02:10 BST is 20 minutes
+    expect(minutesUntil(dep('02:10'), DateTime.utc(2026, 3, 29, 0, 50)), 20);
+    // clocks go back 25-10-2026 at 01:00 UTC: 00:50 UTC (01:50 BST) to 01:10 GMT is 20 minutes
+    expect(minutesUntil(dep('01:10'), DateTime.utc(2026, 10, 25, 0, 50)), 20);
+  });
+
+  test('waitText', () {
+    expect(waitText(0), 'Due');
+    expect(waitText(-2), 'Due');
+    expect(waitText(1), '1 min');
+    expect(waitText(59), '59 min');
+    expect(waitText(65), '1 h 05');
+  });
+
+  testWidgets('next-train card: wait, time, status and a large platform', (tester) async {
+    final now = DateTime.utc(2026, 7, 1, 9, 14);
+    await tester.pumpWidget(wrap(NextTrainCard(dep('10:20', etd: '10:23', platform: '10A', dest: 'Leeds'), nowUtc: now)));
+    expect(find.text('9 min'), findsOneWidget);
+    expect(find.text('10:20'), findsOneWidget);
+    expect(find.text('Exp 10:23'), findsOneWidget);
+    expect(find.text('Leeds'), findsOneWidget);
+    expect(find.text('10A'), findsOneWidget);
+    expect(find.text('Platform'), findsOneWidget);
+  });
+
+  testWidgets('next-train card without a platform says it is not out yet; Delayed replaces the wait', (tester) async {
+    final now = DateTime.utc(2026, 7, 1, 9, 14);
+    await tester.pumpWidget(wrap(NextTrainCard(dep('10:20', etd: 'Delayed'), nowUtc: now)));
+    expect(find.text('Platform not yet shown'), findsOneWidget);
+    expect(find.text('Delayed'), findsOneWidget);
+  });
+
+  testWidgets('cancelled row is dimmed; a late status is amber, not red', (tester) async {
+    await tester.pumpWidget(wrap(Column(children: [
+      DepartureRow(dep('10:15', etd: 'Cancelled', cancelled: true)),
+      DepartureRow(dep('10:20', etd: '10:25')),
+    ])));
+    expect(find.byType(Opacity), findsOneWidget);
+    final ctx = tester.element(find.text('Exp 10:25'));
+    expect(tester.widget<Text>(find.text('Exp 10:25')).style?.color, lateColor(ctx));
+  });
 
   test('statusText', () {
     expect(statusText(dep('10:15', etd: 'On time')), 'On time');

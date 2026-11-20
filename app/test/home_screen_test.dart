@@ -8,11 +8,15 @@ import 'package:platform_app/data/departures.dart';
 import 'package:platform_app/follow/follow_logic.dart';
 import 'package:platform_app/follow/follower.dart';
 import 'package:platform_app/main.dart';
+import 'package:platform_app/ui/departure_row.dart';
 import 'package:platform_app/ui/home_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 
 import 'support.dart';
+
+/// The platform shown for a train, in a row or in the next-train card.
+Finder plat(String p) => find.byWidgetPredicate((w) => w is PlatformBadge && w.platform == p);
 
 void main() {
   late Directory dir;
@@ -51,11 +55,37 @@ void main() {
     await pumpHome(tester);
     expect(find.text('London Kings Cross'), findsOneWidget); // from stations.json, not the API name
     expect(find.textContaining(' m'), findsWidgets); // distance
-    expect(find.text('Plat 9'), findsOneWidget);
+    expect(plat('9'), findsOneWidget);
     expect(find.text('Exp 10:22'), findsOneWidget);
     expect(find.text('Data: National Rail'), findsOneWidget);
     await tester.tap(find.text('Privacy'));
     expect(opened, [Uri.parse(privacyUrl)]);
+  });
+
+  testWidgets('first train that runs is the large card; cancelled ones stay rows', (tester) async {
+    server.boards['KGX'] = boardJson('KGX', clockNow, services: [
+      service('10:15', etd: 'Cancelled', cancelled: true, platform: '9'),
+      service('10:20', etd: '10:22', destination: 'Leeds', platform: '4'),
+      service('10:40', destination: 'York', platform: '1'),
+    ]);
+    await pumpHome(tester);
+    final card = find.byType(NextTrainCard);
+    expect(find.descendant(of: card, matching: find.text('Leeds')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('8 min')), findsOneWidget); // 10:14 now, expected 10:22
+    expect(find.descendant(of: card, matching: find.text('4')), findsOneWidget);
+    expect(find.byType(DepartureRow), findsNWidgets(2));
+    expect(find.text('Live · 10:14:00'), findsOneWidget);
+  });
+
+  testWidgets('recent stations appear under the name and switch station', (tester) async {
+    SharedPreferences.setMockInitialValues({'recent_stations': '["BHM","KGX","EDB"]'});
+    final c = await pumpHome(tester);
+    expect(find.widgetWithText(ActionChip, 'Birmingham New Street'), findsOneWidget);
+    expect(find.byType(ActionChip), findsNWidgets(2)); // not King's Cross, on screen
+    await tester.tap(find.widgetWithText(ActionChip, 'Birmingham New Street'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(c.station!.crs, 'BHM');
   });
 
   testWidgets('empty board says so', (tester) async {
@@ -134,7 +164,7 @@ void main() {
     await pumpHome(tester);
     expect(find.text('2 service alerts'), findsOneWidget);
     expect(find.text('Disruption between Hitchin and Cambridge.'), findsNothing);
-    expect(find.text('Plat 9'), findsOneWidget); // trains stay on the first screen
+    expect(plat('9'), findsOneWidget); // trains stay on the first screen
     await tester.tap(find.text('2 service alerts'));
     await tester.pump();
     expect(find.text('Disruption between Hitchin and Cambridge.'), findsOneWidget);
@@ -177,7 +207,7 @@ void main() {
     });
     await tester.pump();
     expect(find.text('Last updated 10:14'), findsOneWidget); // 09:14 UTC = 10:14 BST
-    expect(find.text('Plat 9'), findsOneWidget);
+    expect(plat('9'), findsOneWidget);
     clockNow = clockNow.add(const Duration(minutes: 10));
     await tester.runAsync(() async {
       timers.fireActive();
@@ -185,7 +215,7 @@ void main() {
     });
     await tester.pump();
     expect(c.expired, isTrue);
-    expect(find.text('Plat 9'), findsNothing);
+    expect(plat('9'), findsNothing);
     expect(find.text('Last updated 10:14'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
   });
@@ -219,11 +249,11 @@ void main() {
     await pumpHome(tester);
     await tester.tap(find.widgetWithText(FilterChip, 'Leeds'));
     await tester.pump();
-    expect(find.text('Plat 9'), findsNothing); // Cambridge row hidden
-    expect(find.text('Plat 4'), findsOneWidget);
+    expect(plat('9'), findsNothing); // Cambridge row hidden
+    expect(plat('4'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilterChip, 'All'));
     await tester.pump();
-    expect(find.text('Plat 9'), findsOneWidget);
+    expect(plat('9'), findsOneWidget);
   });
 
   testWidgets('picker search finds Birmingham and switches station', (tester) async {
@@ -375,7 +405,7 @@ void main() {
       await tester.pump();
       expect(f.current, cambridge);
       expect(bell, findsOneWidget);
-      expect((tester.getCenter(bell).dy - tester.getCenter(find.text('Plat 10')).dy).abs(), lessThan(30));
+      expect((tester.getCenter(bell).dy - tester.getCenter(plat('10')).dy).abs(), lessThan(30));
       await tester.longPress(find.text('09:30'));
       await tester.pump();
       expect(f.current, isNull);

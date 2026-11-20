@@ -15,6 +15,11 @@ import 'domain/pages.dart';
 import 'location.dart';
 
 const _lastStationKey = 'last_station';
+const _recentKey = 'recent_stations';
+
+/// Recent stations offered under the station name, and how many are remembered.
+const recentShown = 3;
+const _recentKept = 10;
 String _filtersKey(String crs) => 'filters_$crs';
 
 const refreshInterval = Duration(seconds: 30);
@@ -95,6 +100,32 @@ class AppController extends ChangeNotifier {
   bool _disposed = false;
 
   DateTime now() => _clock();
+
+  /// Stations used before, most recent first (CRS codes).
+  late List<String> _recent = _loadRecent();
+
+  List<String> _loadRecent() {
+    try {
+      return (jsonDecode(_prefs.getString(_recentKey) ?? '[]') as List).whereType<String>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Shortcuts to other stations used recently: not the one on screen.
+  List<Station> get recentStations {
+    final idx = index;
+    if (idx == null) return const [];
+    return [
+      for (final crs in _recent)
+        if (crs != station?.crs) ?idx.byCrs(crs),
+    ].take(recentShown).toList();
+  }
+
+  void _remember(String crs) {
+    _recent = [crs, ..._recent.where((c) => c != crs)].take(_recentKept).toList();
+    _prefs.setString(_recentKey, jsonEncode(_recent));
+  }
 
   /// Darwin's generation time of the board on screen.
   DateTime? get lastUpdated => board?.generatedAt;
@@ -386,6 +417,7 @@ class AppController extends ChangeNotifier {
     _clearPages();
     _lastFailed = false;
     _prefs.setString(_lastStationKey, s.crs);
+    _remember(s.crs);
     filters = _savedFilters(s.crs);
     _refresh();
   }

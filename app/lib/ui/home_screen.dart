@@ -154,21 +154,76 @@ class _HomeScreenState extends State<HomeScreen> {
     final c = controller;
     final theme = Theme.of(context);
     final name = c.station!.name.isNotEmpty ? c.station!.name : (c.board?.name ?? c.station!.crs);
-    return InkWell(
-      onTap: () => _pick(context),
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(children: [
-          Icon(c.manualStation ? Icons.place_outlined : Icons.my_location, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(name,
-                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+    final recent = c.recentStations;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => _pick(context),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Icon(c.manualStation ? Icons.place_outlined : Icons.my_location, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      ?_liveStatus(context),
+                    ],
+                  ),
+                ),
+                if (c.distanceMeters != null)
+                  Text(formatDistance(c.distanceMeters!), style: theme.textTheme.bodyMedium),
+                const Icon(Icons.expand_more),
+              ],
+            ),
           ),
-          if (c.distanceMeters != null) Text(formatDistance(c.distanceMeters!), style: theme.textTheme.bodyMedium),
-          const Icon(Icons.expand_more),
-        ]),
+        ),
+        if (recent.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final r in recent)
+                  ActionChip(
+                    label: Text(r.name.isNotEmpty ? r.name : r.crs),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => c.chooseStation(r.crs),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// "Live · 10:14:05" with a green dot while the board is fresh; older boards say so in a banner.
+  Widget? _liveStatus(BuildContext context) {
+    final c = controller;
+    final b = c.board;
+    if (b == null || c.stale || c.expired) return null;
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: [
+          Icon(Icons.circle, size: 8, color: goodColor(context)),
+          const SizedBox(width: 6),
+          Text(
+            'Live · ${londonHhmm(b.generatedAt)}:${b.generatedAt.second.toString().padLeft(2, '0')}',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ],
       ),
     );
   }
@@ -191,7 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _openStops = id == null || fetch == null ? null : (fetch(id)..ignore());
       });
 
-  Widget _row(BuildContext context, Board b, Departure d) {
+  Widget _row(BuildContext context, Board b, Departure d, {bool card = false}) {
     // Following polls the next-trains board: a train only on a later page can be followed once
     // the base board lists it.
     final follower = controller.onBaseBoard(d) ? widget.follower : null;
@@ -200,18 +255,27 @@ class _HomeScreenState extends State<HomeScreen> {
     final t = FollowedTrain(crs: b.crs, std: d.std, destination: d.destination, serviceId: d.serviceId);
     void toggleFollow() => _toggleFollow(context, follower!, t, followed);
     final open = _openKey == _key(d);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      DepartureRow(d,
-          followed: followed,
-          onTap: () => _toggleOpen(d),
-          onLongPress: follower == null ? null : toggleFollow),
-      if (open)
-        _StopsPanel(
-          stops: _openStops,
-          followed: followed,
-          onFollow: follower == null ? null : toggleFollow,
-        ),
-    ]);
+    final onLongPress = follower == null ? null : toggleFollow;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (card)
+          NextTrainCard(
+            d,
+            nowUtc: controller.now(),
+            followed: followed,
+            onTap: () => _toggleOpen(d),
+            onLongPress: onLongPress,
+          )
+        else
+          DepartureRow(d, followed: followed, onTap: () => _toggleOpen(d), onLongPress: onLongPress),
+        if (open)
+          Padding(
+            padding: EdgeInsets.only(top: card ? 8 : 0),
+            child: _StopsPanel(stops: _openStops, followed: followed, onFollow: onLongPress),
+          ),
+      ],
+    );
   }
 
   /// End of the list: "Show more" (scrolling near it also loads), a spinner while loading, or why
@@ -240,6 +304,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _board(BuildContext context, Board b) {
     final c = controller;
     final updated = 'Last updated ${londonHhmm(b.generatedAt)}';
+    final visible = c.visibleServices;
+    // The first train that runs goes in the large card; cancelled ones stay rows.
+    final next = nextTrainIndex(visible);
     return [
       if (c.rateLimited) const _Banner('Busy right now. Trying again in a few minutes.'),
       if (c.expired)
@@ -249,13 +316,19 @@ class _HomeScreenState extends State<HomeScreen> {
       if (b.nrccMessages.isNotEmpty) _Alerts(b.nrccMessages, initiallyOpen: c.services.isEmpty),
       if (!c.expired) ...[
         _FilterChips(destinations: c.destinations, selected: c.filters, onToggle: c.toggleFilter, onClear: c.clearFilters),
-        const Divider(),
+        if (next != null) ...[
+          const SizedBox(height: 12),
+          _row(context, b, visible[next], card: true),
+          const SizedBox(height: 4),
+        ] else
+          const Divider(),
         if (c.services.isEmpty)
           const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('No departures in the next 2 hours'))
         else if (c.visibleServices.isEmpty)
           const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('No trains to these destinations right now'))
         else
-          for (final d in c.visibleServices) _row(context, b, d),
+          for (var i = 0; i < visible.length; i++)
+            if (i != next) _row(context, b, visible[i]),
         _more(context),
       ],
     ];
