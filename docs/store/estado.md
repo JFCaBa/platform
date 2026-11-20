@@ -103,6 +103,11 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - iOS: 1.2.0 ya en la App Store. Build 1.3.0 (10) subido; **versión 1.3.0 creada** con el build 10, descripción
   (+ "Your recent stations, one tap away.") y novedades (`listing-en.md`), publicación manual, guardada. Capturas: las
   de la 1.2 (sin la tarjeta nueva). Falta "Add for Review" → enviar (lo pulsa el usuario).
+- 20-11-2026 (después): ficha 1.3.0 en ASC con **cabecera nueva** (`app/tools/icon/header-b-5244x2950.png`), **5 capturas
+  6.3"** y **vista previa** (29,5 s) de `docs/store/screenshots-1.3/` y `docs/store/preview/` (panel de estación UK).
+- Play: Alpha **10 (1.3.0)** guardada por el usuario (sin enviar; la 9 sigue In review). Ficha principal guardada
+  como borrador: gráfico destacado nuevo, 5 capturas nuevas y descripción igualada con iOS (paradas, seguir un tren,
+  "Show more", estaciones recientes). Se envía junto con lo pendiente en Publishing overview.
 - Play: AAB 10 en `app/build/app/outputs/bundle/release/app-release.aab` (52 MB). La entrega anterior (Alpha 9,
   ficha, FGS) sigue **In review**: crear la versión de Alpha con el AAB 10 cuando Google la apruebe, para no
   reiniciar la revisión.
