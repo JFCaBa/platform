@@ -11,7 +11,9 @@ import 'package:timezone/data/latest.dart' as tzdata;
 import 'app_controller.dart';
 import 'data/departures.dart';
 import 'follow/follow_service.dart';
+import 'follow/follow_tracker.dart';
 import 'follow/follower.dart';
+import 'follow/live_activity.dart';
 import 'follow/push_follower.dart';
 import 'follow/push_token.dart';
 import 'location.dart';
@@ -37,15 +39,27 @@ Future<void> main() async {
       : Platform.isAndroid
           ? await FollowService.create()
           : Platform.isIOS
-              ? await PushFollower.create(client: client, prefs: prefs, push: const ChannelPushToken())
+              ? await PushFollower.create(
+                  client: client, prefs: prefs, push: const ChannelPushToken(), activity: ChannelLiveActivity())
               : null;
-  runApp(PlatformApp(controller: controller, follower: follower, fetchStops: departures.fetchStops));
+  final tracker = follower == null
+      ? null
+      : FollowTracker(
+          follower: follower,
+          screen: controller,
+          screenBoard: () => controller.board,
+          fetchBoard: departures.fetch,
+          fetchService: departures.fetchService,
+          clock: () => DateTime.now().toUtc(),
+        );
+  runApp(PlatformApp(controller: controller, follower: follower, tracker: tracker, fetchStops: departures.fetchStops));
 }
 
 class PlatformApp extends StatefulWidget {
-  const PlatformApp({super.key, required this.controller, this.follower, this.fetchStops});
+  const PlatformApp({super.key, required this.controller, this.follower, this.tracker, this.fetchStops});
   final AppController controller;
   final Follower? follower;
+  final FollowTracker? tracker;
   final StopsFetcher? fetchStops;
 
   @override
@@ -72,8 +86,12 @@ class _PlatformAppState extends State<PlatformApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       widget.controller.onForeground();
       widget.follower?.sync();
+      widget.tracker?.onForeground();
     }
-    if (state == AppLifecycleState.paused) widget.controller.onBackground();
+    if (state == AppLifecycleState.paused) {
+      widget.controller.onBackground();
+      widget.tracker?.onBackground();
+    }
   }
 
   @override
@@ -85,7 +103,8 @@ class _PlatformAppState extends State<PlatformApp> with WidgetsBindingObserver {
       themeMode: ThemeMode.system,
       theme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.light),
       darkTheme: ThemeData(colorSchemeSeed: seed, brightness: Brightness.dark),
-      home: HomeScreen(controller: widget.controller, follower: widget.follower, fetchStops: widget.fetchStops),
+      home: HomeScreen(
+          controller: widget.controller, follower: widget.follower, tracker: widget.tracker, fetchStops: widget.fetchStops),
     );
   }
 }

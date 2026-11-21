@@ -1,5 +1,6 @@
 import '../data/departures.dart';
 import '../domain/departure_text.dart';
+import '../domain/position.dart';
 
 /// The one train being followed: its station, the board's scheduled time and destination and,
 /// when the API gives it, Darwin's id for the train.
@@ -50,10 +51,16 @@ Departure? findFollowed(Board b, FollowedTrain t) {
   return null;
 }
 
-/// "08:12 to Cardiff Central · Plat 3 · On time"
-String ongoingText(FollowedTrain t, Departure d) {
+/// The ongoing notification's title: "08:12 to Cardiff Central · Plat 3".
+String ongoingTitle(FollowedTrain t, Departure d) => [t.title, ?platformText(d)].join(' · ');
+
+/// Its text: "22 min · On time · 2 stops away (left Newport)"; just "Cancelled" when it is.
+String ongoingText(Departure d, DateTime nowUtc, TrainPosition? p) {
+  if (isCancelled(d)) return 'Cancelled';
+  final mins = minutesUntil(d, nowUtc);
+  final wait = mins == null ? 'Delayed' : waitText(mins);
   final status = statusText(d);
-  return [t.title, ?platformText(d), if (status.isNotEmpty) status].join(' · ');
+  return [wait, if (status.isNotEmpty && status != wait) status, ?whereShort(p)].join(' · ');
 }
 
 /// What changed from one reading to the next, as alert texts: platform first, then time.

@@ -8,9 +8,11 @@ import 'package:http/testing.dart';
 import 'package:platform_app/config.dart';
 import 'package:platform_app/follow/follow_logic.dart';
 import 'package:platform_app/follow/follower.dart';
+import 'package:platform_app/follow/live_activity.dart';
 import 'package:platform_app/follow/push_follower.dart';
 import 'package:platform_app/follow/push_token.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 
 class FakePushToken implements PushToken {
   bool granted = true;
@@ -57,6 +59,32 @@ class GatedPrefs implements SharedPreferences {
   dynamic noSuchMethod(Invocation i) => throw UnimplementedError('${i.memberName}');
 }
 
+class FakeLiveActivity implements LiveActivity {
+  bool supported = true;
+  String? tokenDuringStart;
+  final started = <(FollowedTrain, Map<String, Object?>)>[];
+  int ended = 0;
+  final _tokens = StreamController<String>.broadcast(sync: true);
+  void give(String token) => _tokens.add(token);
+
+  @override
+  Future<bool> start(FollowedTrain t, Map<String, Object?> state) async {
+    started.add((t, state));
+    final early = tokenDuringStart;
+    if (early != null) give(early);
+    return supported;
+  }
+
+  @override
+  Future<void> update(Map<String, Object?> state) async {}
+
+  @override
+  Future<void> end() async => ended++;
+
+  @override
+  Stream<String> get tokens => _tokens.stream;
+}
+
 class Call {
   Call(this.method, this.body);
   final String method;
@@ -64,6 +92,7 @@ class Call {
 }
 
 void main() {
+  setUpAll(tzdata.initializeTimeZones);
   const train = FollowedTrain(crs: 'KGX', std: '09:30', destination: 'Cambridge', serviceId: 'S30');
   const other = FollowedTrain(crs: 'KGX', std: '09:40', destination: 'York');
   late DateTime now;
@@ -101,9 +130,15 @@ void main() {
         code == 200 ? '{"ok":true}' : code == 410 ? '{"error":"gone"}' : '{"error":"x"}', code);
   });
 
-  Future<PushFollower> make({SharedPreferences? store, Duration postTimeout = followPostTimeout}) async {
+  Future<PushFollower> make(
+      {SharedPreferences? store, Duration postTimeout = followPostTimeout, LiveActivity? activity}) async {
     final f = await PushFollower.create(
-        client: client, prefs: store ?? prefs, push: push, clock: () => now, postTimeout: postTimeout);
+        client: client,
+        prefs: store ?? prefs,
+        push: push,
+        clock: () => now,
+        postTimeout: postTimeout,
+        activity: activity);
     await pumpEventQueue(); // let create's sync finish
     return f;
   }
@@ -542,5 +577,101 @@ void main() {
     expect(calls.last.body, {'token': 'abc123'});
     await f.stop(); // answered 204: nothing left to delete
     expect(calls.map((c) => c.method), ['POST', 'DELETE', 'DELETE']);
+  });
+
+  group('Live Activity', () {
+    late FakeLiveActivity act;
+    setUp(() => act = FakeLiveActivity());
+    final tokenA = 'aa' * 32, tokenB = 'bb' * 32;
+
+    test('starts after the follow is accepted, with a first state', () async {
+      final f = await make(activity: act);
+      expect(await f.follow(train), isTrue);
+      expect(act.started.single.$1, train);
+      expect(act.started.single.$2['status'], '');
+      expect(act.started.single.$2['cancelled'], false);
+      expect(calls.single.body.containsKey('activityToken'), isFalse);
+    });
+
+    test('a late token is posted with the same startedAt and saved', () async {
+      final f = await make(activity: act);
+      await f.follow(train);
+      now = now.add(const Duration(seconds: 5));
+      act.give(tokenA);
+      await pumpEventQueue();
+      expect(calls.length, 2);
+      expect(calls[1].body['activityToken'], tokenA);
+      expect(calls[1].body['startedAt'], calls[0].body['startedAt']);
+      expect(saved()!['activity'], tokenA);
+      // sync re-posts it
+      calls.clear();
+      await f.sync();
+      expect(calls.single.body['activityToken'], tokenA);
+    });
+
+    test('stop ends it, and a token arriving after stop posts nothing', () async {
+      final f = await make(activity: act);
+      await f.follow(train);
+      await f.stop();
+      expect(act.ended, 1);
+      calls.clear();
+      act.give(tokenB);
+      await pumpEventQueue();
+      expect(calls.where((c) => c.method == 'POST'), isEmpty);
+    });
+
+    test('a token for a superseded follow posts nothing', () async {
+      final f = await make(activity: act);
+      await f.follow(train);
+      act.give(tokenA);
+      await pumpEventQueue();
+      await f.follow(other);
+      calls.clear();
+      act.give(tokenB);
+      await pumpEventQueue();
+      expect(calls.single.body['std'], '09:40'); // posted for the current train, not the old one
+      expect(calls.single.body['activityToken'], tokenB);
+    });
+
+    test('unsupported: following still works', () async {
+      act.supported = false;
+      final f = await make(activity: act);
+      expect(await f.follow(train), isTrue);
+      expect(f.current, train);
+    });
+
+    test('a failed follow starts nothing', () async {
+      postAnswers = [410];
+      final f = await make(activity: act);
+      await expectLater(f.follow(train), throwsA(failed(FollowFailure.gone)));
+      expect(act.started, isEmpty);
+    });
+  
+    test('a token given before start answers is not lost', () async {
+      act.tokenDuringStart = tokenA;
+      final f = await make(activity: act);
+      await f.follow(train);
+      await pumpEventQueue();
+      expect(calls.last.body['activityToken'], tokenA);
+    });
+
+    test('unsupported start ends any previous activity', () async {
+      act.supported = false;
+      final f = await make(activity: act);
+      await f.follow(train);
+      expect(act.ended, 1);
+    });
+
+    test('a token whose POST fails is kept and re-posted by sync', () async {
+      final f = await make(activity: act);
+      await f.follow(train);
+      postAnswers = [const SocketException('offline')];
+      act.give(tokenA);
+      await pumpEventQueue();
+      expect(saved()!['activity'], tokenA);
+      calls.clear();
+      await f.sync();
+      expect(calls.single.body['activityToken'], tokenA);
+    });
   });
 }

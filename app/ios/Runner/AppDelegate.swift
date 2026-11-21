@@ -1,3 +1,4 @@
+import ActivityKit
 import Flutter
 import UIKit
 import UserNotifications
@@ -28,6 +29,97 @@ import UserNotifications
     channel.setMethodCallHandler { [weak self] call, result in
       self?.handle(call, result: result)
     }
+    let activity = FlutterMethodChannel(
+      name: "whatplatform/activity", binaryMessenger: engineBridge.applicationRegistrar.messenger())
+    activityChannel = activity
+    activity.setMethodCallHandler { [weak self] call, result in
+      self?.handleActivity(call, result: result)
+    }
+  }
+
+  private var activityChannel: FlutterMethodChannel?
+  private var activityTokenTask: Task<Void, Never>?
+
+  /// The followed train's Live Activity (iOS 16.1+): start / update / end. Its push tokens go
+  /// back to Dart ("token") for the server; never logged.
+  private func handleActivity(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard #available(iOS 16.1, *) else {
+      result(false)
+      return
+    }
+    let args = call.arguments as? [String: Any]
+    switch call.method {
+    case "start":
+      activityTokenTask?.cancel()
+      activityTokenTask = nil
+      guard ActivityAuthorizationInfo().areActivitiesEnabled,
+        let title = args?["title"] as? String, let station = args?["station"] as? String,
+        let state = Self.state(args?["state"])
+      else {
+        result(false)
+        return
+      }
+      Task { @MainActor in
+        await Self.endAll()
+        do {
+          let a = try Activity<TrainActivityAttributes>.request(
+            attributes: TrainActivityAttributes(title: title, station: station),
+            contentState: state, pushType: .token)
+          self.watchTokens(a)
+          result(true)
+        } catch {
+          result(false)
+        }
+      }
+    case "update":
+      guard let state = Self.state(args?["state"]) else {
+        result(nil)
+        return
+      }
+      Task { @MainActor in
+        for a in Activity<TrainActivityAttributes>.activities { await a.update(using: state) }
+        result(nil)
+      }
+    case "end":
+      activityTokenTask?.cancel()
+      activityTokenTask = nil
+      Task { @MainActor in
+        await Self.endAll()
+        result(nil)
+      }
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  @available(iOS 16.1, *)
+  private func watchTokens(_ a: Activity<TrainActivityAttributes>) {
+    activityTokenTask?.cancel()
+    activityTokenTask = Task { @MainActor [weak self] in
+      for await data in a.pushTokenUpdates {
+        let hex = data.map { String(format: "%02x", $0) }.joined()
+        self?.activityChannel?.invokeMethod("token", arguments: hex)
+      }
+    }
+  }
+
+  @available(iOS 16.1, *)
+  private static func endAll() async {
+    for a in Activity<TrainActivityAttributes>.activities {
+      await a.end(dismissalPolicy: .immediate)
+    }
+  }
+
+  /// The content state from Dart's map (same keys as the server's JSON).
+  @available(iOS 16.1, *)
+  private static func state(_ raw: Any?) -> TrainActivityAttributes.ContentState? {
+    guard let m = raw as? [String: Any] else { return nil }
+    return TrainActivityAttributes.ContentState(
+      departs: (m["departs"] as? NSNumber)?.doubleValue,
+      status: m["status"] as? String ?? "",
+      platform: m["platform"] as? String,
+      where: m["where"] as? String,
+      cancelled: m["cancelled"] as? Bool ?? false)
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

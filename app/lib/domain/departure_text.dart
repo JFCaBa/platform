@@ -31,24 +31,29 @@ int? nextTrainIndex(List<Departure> ds) {
 
 final _london = tz.getLocation('Europe/London');
 
-/// Minutes from [nowUtc] to the train's expected (else scheduled) London time; null when
-/// Darwin only says "Delayed". Times on a board are within a few hours: of the departure on
-/// yesterday's, today's or tomorrow's London date, the nearest instant wins (right across
-/// midnight and clock changes).
-int? minutesUntil(Departure d, DateTime nowUtc) {
+/// The train's expected (else scheduled) London time as an instant; null when Darwin only says
+/// "Delayed". Times on a board are within a few hours: of the departure on yesterday's, today's or
+/// tomorrow's London date, the instant nearest to [nowUtc] wins (right across midnight and clock
+/// changes).
+DateTime? departureAt(Departure d, DateTime nowUtc) {
   final etd = d.etd;
   if (etd == 'Delayed') return null;
   final t = etd != null && hhmm.hasMatch(etd) ? etd : d.std;
   if (!hhmm.hasMatch(t)) return null;
   final h = int.parse(t.substring(0, 2)), m = int.parse(t.substring(3));
   final today = tz.TZDateTime.from(nowUtc, _london);
-  int? best;
+  DateTime? best;
   for (final day in [-1, 0, 1]) {
     final at = tz.TZDateTime(_london, today.year, today.month, today.day + day, h, m);
-    final diff = at.difference(nowUtc).inSeconds;
-    if (best == null || diff.abs() < best.abs()) best = diff;
+    if (best == null || at.difference(nowUtc).abs() < best.difference(nowUtc).abs()) best = at;
   }
-  return (best! / 60).floor();
+  return best!.toUtc();
+}
+
+/// Minutes from [nowUtc] to [departureAt], floored; null when unknown.
+int? minutesUntil(Departure d, DateTime nowUtc) {
+  final at = departureAt(d, nowUtc);
+  return at == null ? null : (at.difference(nowUtc).inSeconds / 60).floor();
 }
 
 /// "Due", "1 min", "12 min", "1 h 05".

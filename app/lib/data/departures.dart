@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config.dart';
+import '../domain/position.dart';
 
 class Departure {
   const Departure({
@@ -136,6 +137,13 @@ class DeparturesUnavailable implements Exception {
   String toString() => 'DeparturesUnavailable($cause)';
 }
 
+/// A train's stops ahead (one list per portion) and where it is now (null from an older API).
+class ServiceDetails {
+  const ServiceDetails({required this.portions, this.position});
+  final List<List<Stop>> portions;
+  final TrainPosition? position;
+}
+
 class DeparturesClient {
   DeparturesClient(this._client, {this.baseUrl = apiBaseUrl, this.timeout = const Duration(seconds: 10)});
 
@@ -165,7 +173,10 @@ class DeparturesClient {
 
   /// The stops still ahead of a train, one list per portion (a train that splits has several:
   /// the main one first). Optional data: every failure is [DeparturesUnavailable].
-  Future<List<List<Stop>>> fetchStops(String serviceId) async {
+  Future<List<List<Stop>>> fetchStops(String serviceId) async => (await fetchService(serviceId)).portions;
+
+  /// The stops still ahead and where the train is now. Every failure is [DeparturesUnavailable].
+  Future<ServiceDetails> fetchService(String serviceId) async {
     final http.Response resp;
     try {
       resp = await _client
@@ -177,9 +188,12 @@ class DeparturesClient {
     if (resp.statusCode != 200) throw DeparturesUnavailable('HTTP ${resp.statusCode}');
     try {
       final j = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
-      return [
-        for (final p in j['portions'] as List) [for (final s in p as List) Stop.fromJson(s as Map<String, dynamic>)],
-      ];
+      return ServiceDetails(
+        portions: [
+          for (final p in j['portions'] as List) [for (final s in p as List) Stop.fromJson(s as Map<String, dynamic>)],
+        ],
+        position: TrainPosition.fromJson(j['position']),
+      );
     } catch (e) {
       throw DeparturesUnavailable(e);
     }

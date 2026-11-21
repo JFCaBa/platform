@@ -71,6 +71,17 @@ Delays in amber and cancelled trains dimmed, so the board reads at a glance.
 "Live" and the time of the last update under the station name.
 Your recent stations, one tap away under the station name.
 
+## 1.4.0 (both stores)
+What's new in 1.4 (iOS):
+
+Your train, live: follow a train and see it on the lock screen and in the Dynamic Island, with a countdown, its platform and where it is now ("2 stops away").
+In the app, your train stays on top even while you look at another station.
+
+What's new in 1.4 (Android):
+
+Your train, live: the "Following" notification now shows the countdown, the platform and where the train is now ("2 stops away").
+In the app, your train stays on top even while you look at another station.
+
 ## Privacy
 
 - App Store: Data Not Collected (1.1.0). From 1.2.0: Identifiers → Device ID · Not Linked to You · App Functionality (push token while following).

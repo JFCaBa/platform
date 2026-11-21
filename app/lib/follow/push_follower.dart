@@ -6,8 +6,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config.dart';
+import '../data/departures.dart';
+import '../domain/position.dart';
 import 'follow_logic.dart';
 import 'follow_loop.dart';
+import 'live_activity.dart';
 import 'follower.dart';
 import 'push_token.dart';
 
@@ -20,8 +23,9 @@ const followPostTimeout = Duration(seconds: 18);
 
 /// iOS: the server follows the train and sends push alerts; the app only registers and unregisters.
 class PushFollower extends ChangeNotifier implements Follower {
-  PushFollower._(this._client, this._prefs, this._push, this._baseUrl, this._clock, this._postTimeout) {
+  PushFollower._(this._client, this._prefs, this._push, this._baseUrl, this._clock, this._postTimeout, this._activity) {
     _current = _saved()?.train;
+    _activity?.tokens.listen(_onActivityToken);
   }
 
   /// Call once, before runApp. The saved follow shows at once; the refresh with the server runs in
@@ -33,8 +37,9 @@ class PushFollower extends ChangeNotifier implements Follower {
     String baseUrl = apiBaseUrl,
     DateTime Function() clock = DateTime.now,
     @visibleForTesting Duration postTimeout = followPostTimeout,
+    LiveActivity? activity,
   }) async {
-    final f = PushFollower._(client, prefs, push, baseUrl, clock, postTimeout);
+    final f = PushFollower._(client, prefs, push, baseUrl, clock, postTimeout, activity);
     unawaited(f.sync());
     return f;
   }
@@ -45,6 +50,12 @@ class PushFollower extends ChangeNotifier implements Follower {
   final String _baseUrl;
   final DateTime Function() _clock;
   final Duration _postTimeout;
+
+  /// iOS 16.1+: the lock-screen view of the followed train, fed by the server through its token.
+  final LiveActivity? _activity;
+
+  /// The follow generation the running Live Activity was started for: its tokens belong to it.
+  int _activityGen = -1;
 
   FollowedTrain? _current;
   Future<void> _queue = Future.value();
@@ -95,6 +106,7 @@ class PushFollower extends ChangeNotifier implements Follower {
         await _save(s);
         if (gen != _gen) return true;
         _set(t);
+        await _startActivity(t, gen);
         return true;
       }
       await _dropStray();
@@ -110,6 +122,7 @@ class PushFollower extends ChangeNotifier implements Follower {
     final saved = _saved()?.token;
     final removed = _prefs.remove(_key);
     _set(null);
+    _endActivity();
     return _serial(() async {
       await removed;
       // _registered is read here, once any earlier POST has answered.
@@ -140,7 +153,7 @@ class PushFollower extends ChangeNotifier implements Follower {
       final env = await _push.environment();
       if (gen != _gen) return;
       if (token != s.token) await _delete(s.token);
-      final fresh = _Saved(s.train, s.startedAt, token, env);
+      final fresh = _Saved(s.train, s.startedAt, token, env, s.activity);
       final code = await _post(fresh);
       if (gen != _gen) return;
       if (code == 410) return _clear();
@@ -206,6 +219,48 @@ class PushFollower extends ChangeNotifier implements Follower {
   Future<void> _clear() async {
     await _prefs.remove(_key);
     _set(null);
+    _endActivity();
+  }
+
+  Future<void> _startActivity(FollowedTrain t, int gen) async {
+    final a = _activity;
+    if (a == null) return;
+    // Set before start: iOS may hand over the first push token before start() answers.
+    _activityGen = gen;
+    var started = false;
+    try {
+      final first = contentState(Departure(std: t.std, destination: t.destination, cancelled: false), null, _clock().toUtc());
+      started = await a.start(t, first);
+    } catch (_) {
+      // no Live Activity: alerts still come
+    }
+    if (started && gen == _gen) return;
+    if (_activityGen == gen) _activityGen = -1;
+    // Started for a follow stopped meanwhile (a newer follow's start runs after this one, in the
+    // queue), or not started: then the previous train's activity must not linger either.
+    if (started || gen == _gen) unawaited(a.end().catchError((_) {}));
+  }
+
+  void _endActivity() {
+    _activityGen = -1;
+    unawaited(_activity?.end().catchError((_) {}));
+  }
+
+  /// iOS gave the running activity a (new) push token: tell the server, for the same follow.
+  void _onActivityToken(String token) {
+    final gen = _gen;
+    if (gen != _activityGen) return; // for a follow that was stopped or replaced
+    unawaited(_serial(() async {
+      if (gen != _gen || gen != _activityGen) return;
+      final s = _saved();
+      if (s == null || s.activity == token) return;
+      final fresh = s.withActivity(token);
+      // Kept even if the POST fails: the next sync() posts it again.
+      await _save(fresh);
+      final code = await _post(fresh);
+      if (gen != _gen) return;
+      if (code == 410) await _clear();
+    }).catchError((_) {}));
   }
 
   void _set(FollowedTrain? t) {
@@ -216,18 +271,25 @@ class PushFollower extends ChangeNotifier implements Follower {
 }
 
 class _Saved {
-  const _Saved(this.train, this.startedAt, this.token, this.env);
+  const _Saved(this.train, this.startedAt, this.token, this.env, [this.activity]);
   final FollowedTrain train;
   final int startedAt; // epoch ms
   final String token;
   final String env;
 
+  /// The Live Activity's push token, once iOS gave one.
+  final String? activity;
+
+  _Saved withActivity(String a) => _Saved(train, startedAt, token, env, a);
+
   factory _Saved.fromJson(Map<String, dynamic> j) => _Saved(FollowedTrain.fromJson(j['train'] as Map<String, dynamic>),
-      j['startedAt'] as int, j['token'] as String, j['env'] as String);
+      j['startedAt'] as int, j['token'] as String, j['env'] as String, j['activity'] as String?);
 
-  Map<String, dynamic> toJson() => {'train': train.toJson(), 'startedAt': startedAt, 'token': token, 'env': env};
+  Map<String, dynamic> toJson() =>
+      {'train': train.toJson(), 'startedAt': startedAt, 'token': token, 'env': env, 'activity': ?activity};
 
-  Map<String, dynamic> body() => {'token': token, 'env': env, ...train.toJson(), 'startedAt': startedAt};
+  Map<String, dynamic> body() =>
+      {'token': token, 'env': env, ...train.toJson(), 'startedAt': startedAt, 'activityToken': ?activity};
 
   @override
   bool operator ==(Object other) =>
@@ -235,8 +297,9 @@ class _Saved {
       other.train == train &&
       other.startedAt == startedAt &&
       other.token == token &&
-      other.env == env;
+      other.env == env &&
+      other.activity == activity;
 
   @override
-  int get hashCode => Object.hash(train, startedAt, token, env);
+  int get hashCode => Object.hash(train, startedAt, token, env, activity);
 }

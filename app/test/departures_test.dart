@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:platform_app/config.dart';
 import 'package:platform_app/data/departures.dart';
+import 'package:platform_app/domain/position.dart';
 
 final boardBody = File('test/fixtures/board_kgx.json').readAsStringSync();
 
@@ -127,6 +128,15 @@ void main() {
         ('Hitchin', '15:25', '15:31', false),
         ('Royston', '15:42', 'Cancelled', true),
       ]);
+    });
+
+    test('fetchService: stops and where the train is', () async {
+      final withPos = body.replaceFirst('"portions"', '"position":{"lastStop":"Hitchin","lastAt":"15:26","stopsAway":2},"portions"');
+      final s = await DeparturesClient(MockClient((_) async => okJson(withPos))).fetchService('10741504KNGX____');
+      expect(s.portions.length, 2);
+      expect(s.position, const PassedStop('Hitchin', '15:26', 2));
+      final old = await DeparturesClient(MockClient((_) async => okJson(body))).fetchService('10741504KNGX____');
+      expect(old.position, isNull);
     });
 
     test('any failure → DeparturesUnavailable', () async {

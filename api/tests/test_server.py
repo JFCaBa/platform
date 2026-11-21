@@ -440,7 +440,7 @@ class FollowTest(unittest.TestCase):
                                            "Platform 4\nNow expected 14:40")])
 
     def test_follow_with_activity_token(self):
-        act = "EF" * 32
+        act = "EF" * 128  # iOS 26 gives 256 hex chars
         self.assertEqual(self.request("POST", self.body(activityToken=act))[0], 200)
         (f,) = self.store.for_station("KGX")
         self.assertEqual(f.activity, act.lower())
@@ -483,6 +483,7 @@ class FollowTest(unittest.TestCase):
             "huge startedAt": self.body(startedAt=10 ** 400),
             "not an object": [1, 2],
             "short activityToken": self.body(activityToken="ab" * 31),
+            "513-char activityToken": self.body(activityToken="a" * 513),
             "activityToken not str": self.body(activityToken=5),
         }
         for name, body in cases.items():

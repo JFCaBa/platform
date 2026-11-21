@@ -49,6 +49,8 @@ SERVICE_PATH = re.compile(r"^/service/(.*)$")
 SERVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,40}$")  # e.g. 10741504KNGX____
 USER_AGENT = "platform-api/1.0"
 TOKEN_RE = re.compile(r"[0-9a-fA-F]{64,200}")
+# Live Activity push tokens are longer than device tokens (256 hex chars seen on iOS 26).
+ACTIVITY_TOKEN_RE = re.compile(r"[0-9a-fA-F]{64,512}")
 ENVS = ("production", "sandbox")
 MAX_FOLLOW_BODY = 4096
 MAX_DESTINATION = 100
@@ -196,7 +198,7 @@ def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, 
             and (sid is None or (isinstance(sid, str) and SERVICE_ID_RE.fullmatch(sid)))
             and isinstance(started, int) and not isinstance(started, bool)
             and 0 <= started < MAX_STARTED_MS
-            and (activity is None or (isinstance(activity, str) and TOKEN_RE.fullmatch(activity)))):
+            and (activity is None or (isinstance(activity, str) and ACTIVITY_TOKEN_RE.fullmatch(activity)))):
         return None
     train = {"crs": crs, "std": std, "destination": dest}
     if sid is not None:

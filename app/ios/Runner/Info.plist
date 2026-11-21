@@ -32,6 +32,8 @@
 	<string>To show the nearest station. Only used while the app is open; your location never leaves your phone.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>To show the nearest station. Your location never leaves your phone.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

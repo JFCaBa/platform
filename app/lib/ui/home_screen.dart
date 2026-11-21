@@ -4,12 +4,15 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_controller.dart';
 import '../config.dart';
 import '../data/departures.dart';
-import '../follow/follow_logic.dart';
-import '../follow/follower.dart';
 import '../domain/departure_text.dart';
+import '../domain/position.dart';
+import '../follow/follow_logic.dart';
+import '../follow/follow_tracker.dart';
+import '../follow/follower.dart';
 import 'departure_row.dart';
 import 'format.dart';
 import 'station_picker.dart';
+import 'your_train.dart';
 
 /// Loads the stops still ahead of a train, by Darwin service id.
 typedef StopsFetcher = Future<List<List<Stop>>> Function(String serviceId);
@@ -18,11 +21,15 @@ typedef StopsFetcher = Future<List<List<Stop>>> Function(String serviceId);
 const farFromStationMeters = 25000;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.controller, this.openUrl = _launchExternal, this.follower, this.fetchStops});
+  const HomeScreen(
+      {super.key, required this.controller, this.openUrl = _launchExternal, this.follower, this.tracker, this.fetchStops});
   final AppController controller;
 
   /// Null where trains cannot be followed (iOS for now): rows are then not tappable.
   final Follower? follower;
+
+  /// The followed train, live (where it is, and its board when another station is on screen).
+  final FollowTracker? tracker;
 
   /// Null: tapping a train shows no stops (tests that do not care).
   final StopsFetcher? fetchStops;
@@ -82,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([controller, ?widget.follower]),
+        listenable: Listenable.merge([controller, ?widget.follower, ?widget.tracker]),
         builder: (context, _) => Scaffold(body: SafeArea(child: _body(context))),
       );
 
@@ -126,6 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
             )
           else ...[
             _header(context),
+            ?_yourTrain(context),
             if (!c.manualStation && (c.distanceMeters ?? 0) > farFromStationMeters)
               _Banner("You're ${formatDistance(c.distanceMeters!)} from the nearest station"),
             if (board == null && c.rateLimited)
@@ -264,6 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
             d,
             nowUtc: controller.now(),
             followed: followed,
+            where: followed ? whereText(widget.tracker?.position) : null,
             onTap: () => _toggleOpen(d),
             onLongPress: onLongPress,
           )
@@ -275,6 +284,22 @@ class _HomeScreenState extends State<HomeScreen> {
             child: _StopsPanel(stops: _openStops, followed: followed, onFollow: onLongPress),
           ),
       ],
+    );
+  }
+
+  /// The followed train when another station is on screen; at its own station it is the big card.
+  Widget? _yourTrain(BuildContext context) {
+    final t = widget.tracker, train = t?.train;
+    if (t == null || train == null || controller.station?.crs == train.crs) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: YourTrainStrip(
+        train: train,
+        departure: t.departure,
+        position: t.position,
+        nowUtc: controller.now(),
+        onTap: () => controller.chooseStation(train.crs),
+      ),
     );
   }
 

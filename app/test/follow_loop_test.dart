@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:platform_app/data/departures.dart';
+import 'package:platform_app/domain/position.dart';
 import 'package:platform_app/follow/follow_logic.dart';
 import 'package:platform_app/follow/follow_loop.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 
 import 'follow_logic_test.dart' show board, dep;
 
 void main() {
+  setUpAll(tzdata.initializeTimeZones);
   const t = FollowedTrain(crs: 'CDF', std: '08:12', destination: 'Cardiff Central');
   final t0 = DateTime.utc(2026, 11, 17, 7, 50);
   late DateTime now;
@@ -39,7 +42,7 @@ void main() {
         throw r;
       },
       alert: (title, body) async => alerts.add((title, body)),
-      ongoing: (text) async => ongoing.add(text),
+      ongoing: (title, text) async => ongoing.add('$title | $text'),
     );
   });
 
@@ -53,7 +56,7 @@ void main() {
 
   test('first reading updates ongoing, no alert', () async {
     expect(await tickAfter(Duration.zero, on(platform: '3')), isTrue);
-    expect(ongoing, ['08:12 to Cardiff Central · Plat 3 · On time']);
+    expect(ongoing, ['08:12 to Cardiff Central · Plat 3 | 22 min · On time']);
     expect(alerts, isEmpty);
   });
 
@@ -62,7 +65,7 @@ void main() {
     await tickAfter(s30, on(platform: '5'));
     await tickAfter(s30, on(platform: '5'));
     expect(alerts, [('08:12 to Cardiff Central', 'Platform changed: 3 → 5')]);
-    expect(ongoing.last, '08:12 to Cardiff Central · Plat 5 · On time');
+    expect(ongoing.last, '08:12 to Cardiff Central · Plat 5 | 21 min · On time');
   });
 
   test('errors are silent and keep the last good reading', () async {
@@ -136,7 +139,7 @@ void main() {
         return held.future;
       },
       alert: (_, _) async {},
-      ongoing: (_) async {},
+      ongoing: (_, _) async {},
     );
     final first = slow.tick();
     expect(await slow.tick(), isTrue);
@@ -152,8 +155,39 @@ void main() {
       clock: () => now,
       fetch: (_) async => on(),
       alert: (_, _) async => throw StateError('no channel'),
-      ongoing: (_) async => throw StateError('no channel'),
+      ongoing: (_, _) async => throw StateError('no channel'),
     );
     expect(await bad.tick(), isTrue);
+  });
+
+  test('position every 60 s, only with a service id, errors keep the last', () async {
+    const withId = FollowedTrain(crs: 'CDF', std: '08:12', destination: 'Cardiff Central', serviceId: 'S1');
+    final asked = <String>[];
+    Object answer = const ServiceDetails(portions: [], position: PassedStop('Newport', '07:41', 2));
+    final texts = <String>[];
+    final l = FollowLoop(
+      train: withId,
+      startedAt: t0,
+      clock: () => now,
+      fetch: (_) async => board('CDF', [dep(platform: '3', etd: 'On time', id: 'S1')]),
+      fetchService: (id) async {
+        asked.add(id);
+        final a = answer;
+        if (a is ServiceDetails) return a;
+        throw a;
+      },
+      alert: (_, _) async {},
+      ongoing: (_, text) async => texts.add(text),
+    );
+    await l.tick();
+    now = now.add(s30);
+    await l.tick();
+    expect(asked, ['S1']);
+    expect(texts.last, '21 min · On time · 2 stops away (left Newport)');
+    answer = const DeparturesUnavailable('x');
+    now = now.add(s30);
+    await l.tick();
+    expect(asked, ['S1', 'S1']);
+    expect(texts.last, contains('2 stops away (left Newport)'));
   });
 }

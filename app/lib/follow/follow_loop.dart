@@ -1,5 +1,6 @@
 import '../data/departures.dart';
 import '../domain/departure_text.dart';
+import '../domain/position.dart';
 import 'follow_logic.dart';
 
 const followMaxDuration = Duration(hours: 3);
@@ -15,14 +16,22 @@ class FollowLoop {
     required this.alert,
     required this.ongoing,
     required this.clock,
+    this.fetchService,
   });
+
+  static const positionEvery = Duration(seconds: 60);
 
   final FollowedTrain train;
   final DateTime startedAt;
   final Future<Board> Function(String crs) fetch;
   final Future<void> Function(String title, String body) alert;
-  final Future<void> Function(String text) ongoing;
+  final Future<void> Function(String title, String text) ongoing;
   final DateTime Function() clock;
+
+  /// Where the train is, at most every [positionEvery]; only for a train with a service id.
+  final Future<ServiceDetails> Function(String serviceId)? fetchService;
+  TrainPosition? _position;
+  DateTime? _positionAt;
 
   Departure? _last;
   DateTime? _cancelledAt;
@@ -62,10 +71,24 @@ class FollowLoop {
           await _safely(() => alert(train.title, body));
         }
       }
-      await _safely(() => ongoing(ongoingText(train, d)));
+      await _refreshPosition();
+      final now = clock();
+      await _safely(() => ongoing(ongoingTitle(train, d), ongoingText(d, now.toUtc(), _position)));
       return !_expired(clock());
     } finally {
       _busy = false;
+    }
+  }
+
+  Future<void> _refreshPosition() async {
+    final sid = train.serviceId, fetch = fetchService, now = clock(), last = _positionAt;
+    if (sid == null || fetch == null) return;
+    if (last != null && now.difference(last) < positionEvery && !now.isBefore(last)) return;
+    _positionAt = now;
+    try {
+      _position = (await fetch(sid)).position ?? _position;
+    } catch (_) {
+      // keep the last position
     }
   }
 

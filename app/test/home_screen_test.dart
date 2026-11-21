@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,11 +6,14 @@ import 'package:material_ui/material_ui.dart';
 import 'package:platform_app/app_controller.dart';
 import 'package:platform_app/config.dart';
 import 'package:platform_app/data/departures.dart';
+import 'package:platform_app/domain/position.dart';
 import 'package:platform_app/follow/follow_logic.dart';
+import 'package:platform_app/follow/follow_tracker.dart';
 import 'package:platform_app/follow/follower.dart';
 import 'package:platform_app/main.dart';
 import 'package:platform_app/ui/departure_row.dart';
 import 'package:platform_app/ui/home_screen.dart';
+import 'package:platform_app/ui/your_train.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 
@@ -38,7 +42,8 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
-  Future<AppController> pumpHome(WidgetTester tester, {Follower? follower, StopsFetcher? fetchStops}) async {
+  Future<AppController> pumpHome(WidgetTester tester,
+      {Follower? follower, StopsFetcher? fetchStops, FollowTracker Function(AppController c)? tracker}) async {
     late AppController c;
     await tester.runAsync(() async {
       c = AppController(server.client, dir, DeparturesClient(server.client), location,
@@ -46,7 +51,13 @@ void main() {
       await c.start();
       await Future<void>.delayed(const Duration(milliseconds: 30));
     });
-    await tester.pumpWidget(MaterialApp(home: HomeScreen(controller: c, openUrl: (u) async => opened.add(u), follower: follower, fetchStops: fetchStops)));
+    await tester.pumpWidget(MaterialApp(
+        home: HomeScreen(
+            controller: c,
+            openUrl: (u) async => opened.add(u),
+            follower: follower,
+            tracker: tracker?.call(c),
+            fetchStops: fetchStops)));
     await tester.pump();
     return c;
   }
@@ -561,6 +572,58 @@ void main() {
       await tester.longPress(find.text('09:30'));
       await tester.pump();
       expect(find.byType(SnackBar), findsNothing);
+    });
+  });
+
+  group('your train, live', () {
+    const peterborough = FollowedTrain(crs: 'BHM', std: '10:42', destination: 'Peterborough', serviceId: 'P42');
+    const where = PassedStop('Hitchin', '09:31', 2);
+
+    FollowTracker Function(AppController) trackerFor(FakeFollower f) => (c) => FollowTracker(
+          follower: f,
+          screen: c,
+          screenBoard: () => c.board,
+          fetchBoard: (crs) async => Board.fromJson(jsonDecode(boardJson(crs, clockNow,
+              services: [service('10:42', destination: 'Peterborough', platform: '2', serviceId: 'P42')])) as Map<String, dynamic>),
+          fetchService: (id) async => const ServiceDetails(portions: [], position: where),
+          clock: () => clockNow,
+          periodic: timers.create,
+        );
+
+    testWidgets('nothing followed: no strip', (tester) async {
+      final f = FakeFollower();
+      await pumpHome(tester, follower: f, tracker: trackerFor(f));
+      expect(find.byType(YourTrainStrip), findsNothing);
+    });
+
+    testWidgets('a train at another station shows on top, tap opens its station', (tester) async {
+      final f = FakeFollower()..current = peterborough;
+      final c = await pumpHome(tester, follower: f, tracker: trackerFor(f));
+      await tester.pump();
+      final strip = find.byType(YourTrainStrip);
+      expect(strip, findsOneWidget);
+      expect(find.descendant(of: strip, matching: find.text('Your train')), findsOneWidget);
+      expect(find.descendant(of: strip, matching: find.text('10:42 to Peterborough')), findsOneWidget);
+      expect(find.descendant(of: strip, matching: find.text('28 min')), findsOneWidget); // 10:14 London now
+      expect(find.descendant(of: strip, matching: find.text('Plat 2')), findsOneWidget);
+      expect(find.descendant(of: strip, matching: find.text('2 stops away · left Hitchin 09:31')), findsOneWidget);
+      await tester.tap(strip);
+      await tester.pump();
+      expect(c.station?.crs, 'BHM');
+    });
+
+    testWidgets('at its own station the big card says where it is', (tester) async {
+      server.boards['KGX'] = boardJson('KGX', clockNow, services: [
+        service('10:20', destination: 'Leeds', serviceId: 'S20'),
+        service('10:30', destination: 'Cambridge', platform: '10', serviceId: 'S30'),
+      ]);
+      final f = FakeFollower()..current = const FollowedTrain(crs: 'KGX', std: '10:30', destination: 'Cambridge', serviceId: 'S30');
+      await pumpHome(tester, follower: f, tracker: trackerFor(f));
+      await tester.pump();
+      expect(find.byType(YourTrainStrip), findsNothing);
+      final card = find.byType(NextTrainCard);
+      expect(find.descendant(of: card, matching: find.text('Cambridge')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('2 stops away · left Hitchin 09:31')), findsOneWidget);
     });
   });
 }

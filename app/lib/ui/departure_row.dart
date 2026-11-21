@@ -108,8 +108,12 @@ Color _statusColor(BuildContext context, Departure d) => isCancelled(d)
 /// The first train that runs, large: how long until it leaves and its platform, which is what
 /// someone walking into the station wants. Tap for stops, long press to follow, like a row.
 class NextTrainCard extends StatelessWidget {
-  const NextTrainCard(this.d, {super.key, required this.nowUtc, this.followed = false, this.onTap, this.onLongPress});
+  const NextTrainCard(this.d,
+      {super.key, required this.nowUtc, this.followed = false, this.where, this.onTap, this.onLongPress});
   final Departure d;
+
+  /// Where the train is now ("2 stops away · left Stevenage 16:31"), when known.
+  final String? where;
   final DateTime nowUtc;
   final bool followed;
   final VoidCallback? onTap;
@@ -172,6 +176,23 @@ class NextTrainCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(d.destination, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                      if (where != null && !cancelled)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.train, size: 16, color: scheme.primary),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  where!,
+                                  style: theme.textTheme.bodyMedium?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       if (d.via != null) Text(d.via!, style: muted),
                       if (d.operator != null) Text(d.operator!, style: muted),
                       if (reason != null)

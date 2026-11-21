@@ -7,6 +7,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:timezone/data/latest.dart' as tzdata;
 
 import '../data/departures.dart';
 import 'follow_logic.dart';
@@ -133,7 +134,11 @@ Future<void> _clearSaved() async {
 }
 
 @pragma('vm:entry-point')
-void followCallback() => FlutterForegroundTask.setTaskHandler(_FollowHandler());
+void followCallback() {
+  // Its own isolate: the time zones main() loaded are not here (the countdown needs London's).
+  tzdata.initializeTimeZones();
+  FlutterForegroundTask.setTaskHandler(_FollowHandler());
+}
 
 /// Runs in the service's own isolate.
 class _FollowHandler extends TaskHandler {
@@ -171,10 +176,11 @@ class _FollowHandler extends TaskHandler {
       train: train,
       startedAt: DateTime.fromMillisecondsSinceEpoch(startedMs),
       fetch: DeparturesClient(_client).fetch,
+      fetchService: DeparturesClient(_client).fetchService,
       clock: DateTime.now,
       alert: (title, body) => _notes.show(id: _alertId++, title: title, body: body, notificationDetails: _alertDetails),
-      ongoing: (text) async {
-        if (!_ending) await FlutterForegroundTask.updateService(notificationTitle: 'Following', notificationText: text);
+      ongoing: (title, text) async {
+        if (!_ending) await FlutterForegroundTask.updateService(notificationTitle: title, notificationText: text);
       },
     );
     unawaited(_poll());

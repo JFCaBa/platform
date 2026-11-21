@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:platform_app/data/departures.dart';
+import 'package:platform_app/domain/position.dart';
 import 'package:platform_app/follow/follow_logic.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 
 Departure dep({String std = '08:12', String dest = 'Cardiff Central', String? etd, String? platform,
         bool cancelled = false, String? cancelReason, String? id}) =>
@@ -14,6 +16,7 @@ Board board(String crs, List<Departure> services) => Board(
     crs: crs, generatedAt: DateTime.utc(2026, 11, 17, 8), nrccMessages: const [], attribution: 'x', services: services);
 
 void main() {
+  setUpAll(tzdata.initializeTimeZones);
   const t = FollowedTrain(crs: 'CDF', std: '08:12', destination: 'Cardiff Central');
 
   test('matches ignores etd and platform', () {
@@ -39,9 +42,17 @@ void main() {
     expect(findFollowed(board('CDF', [dep(std: '08:00')]), t), isNull);
   });
 
-  test('ongoingText', () {
-    expect(ongoingText(t, dep(platform: '3', etd: 'On time')), '08:12 to Cardiff Central · Plat 3 · On time');
-    expect(ongoingText(t, dep()), '08:12 to Cardiff Central');
+  test('ongoingTitle and ongoingText', () {
+    final now = DateTime.utc(2026, 11, 17, 7, 50);
+    expect(ongoingTitle(t, dep(platform: '3', etd: 'On time')), '08:12 to Cardiff Central · Plat 3');
+    expect(ongoingTitle(t, dep()), '08:12 to Cardiff Central');
+    expect(ongoingText(dep(platform: '3', etd: 'On time'), now, const PassedStop('Newport', '07:41', 2)),
+        '22 min · On time · 2 stops away (left Newport)');
+    expect(ongoingText(dep(etd: '08:20'), now, const PassedStop('Newport', '07:41', 1)),
+        '30 min · Exp 08:20 · Next stop: here (left Newport)');
+    expect(ongoingText(dep(), now, null), '22 min');
+    expect(ongoingText(dep(etd: 'Delayed'), now, const StartsHere()), 'Delayed · Starts here');
+    expect(ongoingText(dep(etd: 'Cancelled', cancelled: true), now, const StartsHere()), 'Cancelled');
     expect(t.title, '08:12 to Cardiff Central');
   });
 
