@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from typing import Callable, TextIO
 
 from .board import HHMM
+from .live import content_state
 
 
-def is_cancelled(d: dict) -> bool:
-    return bool(d.get("cancelled")) or d.get("etd") == "Cancelled"
+from .live import is_cancelled  # noqa: E402  (re-exported: tests and server import it from here)
 
 
 def matches(train: dict, d: dict) -> bool:
@@ -59,8 +59,15 @@ def changes(before: dict, after: dict) -> list[str]:
 MAX_DURATION = 3 * 3600
 CANCELLED_LINGER = 120
 RATE_LIMIT_PAUSE = 300
+POSITION_EVERY = 60
+STALE_AFTER = 600  # the Live Activity looks stale this long after departure
+STALE_UNKNOWN = 3600  # "Delayed" (no time): an unchanged state is not re-pushed
+DISMISS_GONE = 900  # an ended activity stays on the lock screen this long when the train went
+DISMISS_NOW = 0
 
-_UPDATABLE = {"last", "cancelled_at", "missing"}
+_UPDATABLE = {"last", "cancelled_at", "missing", "activity", "state", "position", "position_at"}
+_ACTIVITY_FIELDS = {"activity", "state", "position", "position_at"}
+END_ATTEMPTS = 3
 _SAME_KEYS = ("crs", "std", "destination", "serviceId")
 
 
@@ -82,6 +89,21 @@ class Follow:
     cancelled_at: float | None
     missing: int
     gen: int
+    activity: str | None = None  # Live Activity push token
+    state: dict | None = None  # content state last pushed to it
+    position: dict | None = None
+    position_at: float | None = None
+    act_gen: int = 0  # bumped when the activity token changes; guards the Live Activity fields only
+
+
+@dataclass
+class Ended:
+    """A Live Activity whose follow ended: the poller sends it one `end`."""
+    activity: str
+    env: str
+    state: dict | None
+    dismiss_after: int
+    attempts: int = 0
 
 
 class FollowStore:
@@ -105,6 +127,38 @@ class FollowStore:
         self._epochs: dict[str, int] = {}  # insertion-ordered: oldest bump first
         self._epoch_ctr = 0
         self._floor = 0  # value of the last pruned entry; tokens not in the map read this
+        self._ended: list[Ended] = []
+
+    def _end(self, f: Follow, dismiss_after: int) -> None:
+        """Caller holds the lock. An activity that never got a state ends at once (no blank card)."""
+        if f.activity:
+            self._ended.append(Ended(f.activity, f.env, f.state, dismiss_after if f.state else DISMISS_NOW))
+
+    def take_ended(self) -> list[Ended]:
+        """Ends to send; never one for an activity token a live follow holds again."""
+        with self._lock:
+            live = {f.activity for f in self._follows.values() if f.activity}
+            out, self._ended = [e for e in self._ended if e.activity not in live], []
+            return out
+
+    def retry_end(self, e: Ended) -> None:
+        with self._lock:
+            if e.attempts + 1 < END_ATTEMPTS:
+                self._ended.append(dataclasses.replace(e, attempts=e.attempts + 1))
+
+    def set_activity(self, token: str, train: dict, activity: str) -> bool:
+        """Attach a Live Activity token to this token's follow of `train` (keeps its baseline and
+        start). A different, previous activity token is ended. False if not following `train`."""
+        with self._lock:
+            cur = self._follows.get(token)
+            if cur is None or not _same_train(cur.train, train):
+                return False
+            if cur.activity != activity:
+                if cur.activity:
+                    self._end(cur, DISMISS_NOW)
+                cur.act_gen += 1  # not `gen`: alert bookkeeping in flight must still land
+                cur.activity, cur.state = activity, None
+            return True
 
     def epoch(self, token: str) -> int:
         with self._lock:
@@ -124,7 +178,7 @@ class FollowStore:
             self._floor = self._epochs.pop(oldest)
 
     def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float,
-               expect_epoch: int | None = None) -> str:
+               expect_epoch: int | None = None, activity: str | None = None) -> str:
         """"ok", "busy" (caps), or "stale" when `expect_epoch` is given and the token's epoch
         has changed since (nothing is written then)."""
         crs = train.get("crs")
@@ -139,6 +193,11 @@ class FollowStore:
                     self._gen += 1
                     cur.gen = self._gen
                     cur.env = env
+                if activity and activity != cur.activity:
+                    if cur.activity:
+                        self._end(cur, DISMISS_NOW)
+                    cur.act_gen += 1
+                    cur.activity, cur.state = activity, None
                 self._bump(token)
                 return "ok"
             if cur is None and len(self._follows) >= self._max_follows:
@@ -146,8 +205,11 @@ class FollowStore:
             stations = {f.train.get("crs") for t, f in self._follows.items() if t != token}
             if train.get("crs") not in stations and len(stations) >= self._max_stations:
                 return "busy"
+            if cur is not None and cur.activity != activity:
+                self._end(cur, DISMISS_NOW)  # another train replaces it
             self._gen += 1
-            self._follows[token] = Follow(token, env, dict(train), started, dict(baseline), None, 0, self._gen)
+            self._follows[token] = Follow(token, env, dict(train), started, dict(baseline), None, 0, self._gen,
+                                          activity=activity)
             self._bump(token)
             return "ok"
 
@@ -158,7 +220,9 @@ class FollowStore:
             return (cur is not None and _same_train(cur.train, train)
                     and (env is None or cur.env == env))
 
-    def update(self, token: str, gen: int, **fields) -> bool:
+    def update(self, token: str, gen: int, act_gen: int | None = None, **fields) -> bool:
+        """Writes `fields` if the follow is still generation `gen`. Live Activity fields are
+        dropped when `act_gen` is given and the activity token changed since."""
         bad = set(fields) - _UPDATABLE
         if bad:
             raise TypeError(f"cannot update fields: {sorted(bad)}")
@@ -166,6 +230,8 @@ class FollowStore:
             cur = self._follows.get(token)
             if cur is None or cur.gen != gen:
                 return False
+            if act_gen is not None and cur.act_gen != act_gen:
+                fields = {k: v for k, v in fields.items() if k not in _ACTIVITY_FIELDS}
             for k, v in fields.items():
                 setattr(cur, k, dict(v) if k == "last" and v is not None else v)
             return True
@@ -175,11 +241,12 @@ class FollowStore:
             cur = self._follows.get(token)
             return cur is not None and cur.gen == gen
 
-    def remove(self, token: str, gen: int | None = None) -> None:
+    def remove(self, token: str, gen: int | None = None, dismiss_after: int = DISMISS_NOW) -> None:
         with self._lock:
             cur = self._follows.get(token)
             if cur is not None and (gen is None or cur.gen == gen):
                 del self._follows[token]
+                self._end(cur, dismiss_after)
             if gen is None:  # a DELETE wins over a POST in flight even if nothing is stored yet
                 self._bump(token)
 
@@ -202,17 +269,20 @@ class Poller:
     generation, so a DELETE or replacement made meanwhile wins."""
 
     def __init__(self, store: FollowStore, fetch_board: Callable[[str], dict], push,
+                 fetch_position: Callable[[str], dict] | None = None,
                  clock: Callable[[], float] = time.time, log: TextIO = sys.stderr) -> None:
         self._store = store
         self._log = log
         self._fetch = fetch_board
         self._push = push
+        self._fetch_position = fetch_position
         self._clock = clock
         self._paused_until = 0.0
 
     def tick(self) -> None:
         now = self._clock()
         self._expire(now)
+        self._send_ends(now)
         if now < self._paused_until:
             return
         for crs in sorted(self._store.stations()):
@@ -235,9 +305,50 @@ class Poller:
     def _expire(self, now: float) -> None:
         for crs in self._store.stations():
             for f in self._store.for_station(crs):
-                if now - f.started >= MAX_DURATION or (
-                        f.cancelled_at is not None and now - f.cancelled_at >= CANCELLED_LINGER):
-                    self._store.remove(f.token, f.gen)
+                if now - f.started >= MAX_DURATION:
+                    self._store.remove(f.token, f.gen, DISMISS_NOW)
+                elif f.cancelled_at is not None and now - f.cancelled_at >= CANCELLED_LINGER:
+                    self._store.remove(f.token, f.gen, DISMISS_GONE)
+
+    def _send_ends(self, now: float) -> None:
+        for e in self._store.take_ended():
+            state = e.state or {"departs": None, "status": "", "platform": None, "where": None, "cancelled": False}
+            try:
+                result = self._push.send_activity(e.activity, e.env, state, event="end", priority=10,
+                                                  stale=int(now), dismissal=int(now) + e.dismiss_after)
+            except Exception as ex:
+                self._note(ex)
+                result = "error"
+            if result == "error":
+                self._store.retry_end(e)  # a few more ticks, then ActivityKit's own timeout
+
+    def _activity(self, f: Follow, d: dict, now: float) -> dict:
+        """Pushes the Live Activity's state when it changed; the fields to store."""
+        out: dict = {}
+        position = f.position
+        sid = f.train.get("serviceId")
+        if sid and self._fetch_position and (f.position_at is None or now - f.position_at >= POSITION_EVERY):
+            out["position_at"] = now
+            try:
+                position = self._fetch_position(sid)
+                out["position"] = position
+            except Exception as e:  # keep the last position
+                self._note(e)
+        state = content_state(d, position, now)
+        if state == f.state:
+            return out
+        old = f.state
+        urgent = old is not None and (state["platform"] != old.get("platform")
+                                      or state["cancelled"] != old.get("cancelled"))
+        result = self._push.send_activity(f.activity, f.env, state, priority=10 if urgent else 5,
+                                          stale=state["departs"] + STALE_AFTER if state["departs"]
+                                          else int(now) + STALE_UNKNOWN)
+        if result == "gone":
+            out["activity"] = None
+            out["state"] = None
+        else:
+            out["state"] = state  # best effort, like alerts: never repeated
+        return out
 
     def _check(self, f: Follow, board: dict, now: float) -> None:
         # The copies were taken before the fetch and earlier sends at this station; skip a follow
@@ -247,7 +358,7 @@ class Poller:
         d = find_followed(board, f.train)
         if d is None:
             if f.missing + 1 >= 2:
-                self._store.remove(f.token, f.gen)
+                self._store.remove(f.token, f.gen, DISMISS_GONE)
             else:
                 self._store.update(f.token, f.gen, missing=f.missing + 1)
             return
@@ -266,8 +377,14 @@ class Poller:
             if result == "gone":
                 self._store.remove(f.token, f.gen)
                 return
+        extra = {}
+        if f.activity:
+            try:
+                extra = self._activity(f, d, now)
+            except Exception as e:  # the Live Activity never stops the alerts
+                self._note(e)
         # Best effort: `last` advances even when the push failed, so an alert is never repeated.
-        self._store.update(f.token, f.gen, last=d, cancelled_at=cancelled_at, missing=0)
+        self._store.update(f.token, f.gen, f.act_gen, last=d, cancelled_at=cancelled_at, missing=0, **extra)
 
     def run(self, stop: threading.Event, every: float = 30.0) -> None:
         while not stop.is_set():

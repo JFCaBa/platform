@@ -267,6 +267,39 @@ class ServerTest(unittest.TestCase):
                                     "cancelled": False})
         self.assertEqual(stops[-1]["name"], "Cambridge")
 
+    def test_service_has_position(self):
+        svc = json.loads(self.get("/service/10741504KNGX____")[2])
+        self.assertIn("position", svc)
+
+    def test_service_details_cached_30s(self):
+        self.assertEqual(self.get("/service/10741504KNGX____")[0], 200)
+        self.assertEqual(self.get("/service/10741504KNGX____")[0], 200)
+        self.assertEqual(self.darwin.requests, 1)
+        self.assertEqual(self.api.fetch_position("10741504KNGX____"), json.loads(self.get("/service/10741504KNGX____")[2])["position"])
+        self.assertEqual(self.darwin.requests, 1)  # the poller's lookup shares the cache
+
+    def test_service_cache_expiry(self):
+        now = [100.0]
+        cache = srv.ServiceCache(ttl=30, clock=lambda: now[0])
+        calls = []
+        def load():
+            calls.append(1)
+            return {"n": len(calls)}
+        self.assertEqual(cache.get("A", load), {"n": 1})
+        now[0] += 29
+        self.assertEqual(cache.get("A", load), {"n": 1})
+        now[0] += 2
+        self.assertEqual(cache.get("A", load), {"n": 2})
+        self.assertEqual(cache.get("B", load), {"n": 3})
+
+    def test_service_cache_does_not_keep_errors(self):
+        cache = srv.ServiceCache(ttl=30, clock=lambda: 0.0)
+        def boom():
+            raise ValueError("x")
+        with self.assertRaises(ValueError):
+            cache.get("A", boom)
+        self.assertEqual(cache.get("A", lambda: {"ok": 1}), {"ok": 1})
+
     def test_bad_service_id_400_without_upstream_call(self):
         for sid in ["x", "a/b", "../etc", "%2F", "A" * 41]:
             status, _, body = self.get(f"/service/{sid}")
@@ -406,6 +439,20 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(self.push.sent, [(TOKEN, "sandbox", "14:33 to Newcastle",
                                            "Platform 4\nNow expected 14:40")])
 
+    def test_follow_with_activity_token(self):
+        act = "EF" * 32
+        self.assertEqual(self.request("POST", self.body(activityToken=act))[0], 200)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual(f.activity, act.lower())
+
+    def test_late_activity_token_no_darwin_call_keeps_start(self):
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        self.now += 60
+        self.assertEqual(self.request("POST", self.body(activityToken="ef" * 32)), (200, {"ok": True}))
+        self.assertEqual(self.darwin.requests, 1)
+        (f,) = self.store.for_station("KGX")
+        self.assertEqual((f.activity, f.started), ("ef" * 32, self.now - 60))
+
     def test_follow_without_service_id_stores_no_service_id(self):
         self.assertEqual(self.request("POST", self.body(serviceId=None))[0], 200)
         (f,) = self.store.for_station("KGX")
@@ -435,6 +482,8 @@ class FollowTest(unittest.TestCase):
             "str startedAt": self.body(startedAt="1800000000000"),
             "huge startedAt": self.body(startedAt=10 ** 400),
             "not an object": [1, 2],
+            "short activityToken": self.body(activityToken="ab" * 31),
+            "activityToken not str": self.body(activityToken=5),
         }
         for name, body in cases.items():
             with self.subTest(name):
@@ -712,6 +761,8 @@ class StationsTest(unittest.TestCase):
         class Dummy:
             server_address = ("0.0.0.0", 8510)
             stations = {"KGX"}
+
+            fetch_position = None
 
             def fetch_board(self, crs):
                 return {}

@@ -133,6 +133,30 @@ def _stop(raw: dict) -> dict:
     }
 
 
+def _passed(at) -> bool:
+    return at == "On time" or (isinstance(at, str) and bool(HHMM.match(at)))
+
+
+def train_position(darwin: dict) -> dict:
+    """Where the train is, from the stops before this station (portion 0: the train's own path;
+    later portions are trains that join it). A stop is passed once Darwin gives it an actual time
+    (`at` "On time" or HH:MM; "No report" and "Cancelled" don't count). One of
+    {"lastStop", "lastAt", "stopsAway"}, {"notStarted": origin}, {"startsHere": True}."""
+    portions = darwin.get("previousCallingPoints") or []
+    first = portions[0] if portions and isinstance(portions[0], dict) else {}
+    points = [p for p in first.get("callingPoint") or [] if isinstance(p, dict)]
+    if not points:
+        return {"startsHere": True}
+    for i in range(len(points) - 1, -1, -1):
+        p = points[i]
+        at = p.get("at")
+        if _passed(at):
+            return {"lastStop": p.get("locationName"),
+                    "lastAt": at if at != "On time" else p.get("st"),
+                    "stopsAway": len(points) - i}
+    return {"notStarted": points[0].get("locationName")}
+
+
 def to_stops(darwin: dict, attribution: str, now: datetime) -> dict:
     """Service Details → the stops still ahead, one list per portion: a train that splits lists
     the main portion first and each portion that leaves it after, from the split onwards."""
@@ -145,4 +169,5 @@ def to_stops(darwin: dict, attribution: str, now: datetime) -> dict:
         "generatedAt": _utc_iso(darwin.get("generatedAt"), now),
         "attribution": attribution,
         "portions": portions,
+        "position": train_position(darwin),
     }

@@ -117,22 +117,50 @@ class Apns:
 
     def send(self, token: str, env: str, title: str, body: str) -> str:
         """Returns "ok", "gone" (token no longer valid) or "error". Never raises.
-        No apns-collapse-id: every alert stays on the lock screen. One immediate retry only when the
-        request certainly wasn't sent (connect error/timeout, pool timeout), never on an HTTP status."""
+        No apns-collapse-id: every alert stays on the lock screen."""
         try:
             payload = build_payload(title, body)
-            if payload is None:
-                self._note("apns payload too large")
-                return "error"
+        except Exception as e:
+            self._note(f"apns payload {type(e).__name__}")
+            return "error"
+        if payload is None:
+            self._note("apns payload too large")
+            return "error"
+        return self._post(token, env, payload, {
+            "apns-topic": self._topic,
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+            "apns-expiration": str(int(self._clock()) + EXPIRATION_SECONDS),
+        })
+
+    def send_activity(self, token: str, env: str, state: dict, *, event: str = "update",
+                      priority: int = 5, stale: int, dismissal: int | None = None) -> str:
+        """A Live Activity update or end ("ok" | "gone" | "error"; never raises)."""
+        try:
+            aps = {"timestamp": int(self._clock()), "event": event, "content-state": state,
+                   "stale-date": int(stale)}
+            if dismissal is not None:
+                aps["dismissal-date"] = int(dismissal)
+            payload = json.dumps({"aps": aps}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except Exception as e:
+            self._note(f"apns payload {type(e).__name__}")
+            return "error"
+        if len(payload) > MAX_PAYLOAD:
+            self._note("apns payload too large")
+            return "error"
+        return self._post(token, env, payload, {
+            "apns-topic": f"{self._topic}.push-type.liveactivity",
+            "apns-push-type": "liveactivity",
+            "apns-priority": str(priority),
+        })
+
+    def _post(self, token: str, env: str, payload: bytes, extra: dict) -> str:
+        """One immediate retry only when the request certainly wasn't sent (connect error/timeout,
+        pool timeout), never on an HTTP status."""
+        try:
             host = HOSTS.get(env, HOSTS["production"])
-            headers = {
-                "authorization": "bearer " + self._token(),
-                "apns-topic": self._topic,
-                "apns-push-type": "alert",
-                "apns-priority": "10",
-                "apns-expiration": str(int(self._clock()) + EXPIRATION_SECONDS),
-                "content-type": "application/json",
-            }
+            headers = {"authorization": "bearer " + self._token(), **extra,
+                       "content-type": "application/json"}
             url = f"https://{host}/3/device/{token}"
             try:
                 r = self._client.post(url, content=payload, headers=headers)

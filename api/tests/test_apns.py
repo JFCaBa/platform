@@ -72,6 +72,32 @@ class ApnsTest(unittest.TestCase):
             "sound": "default",
         }})
 
+    def test_activity_update_shape(self):
+        state = {"departs": 1_000_600, "status": "On time", "platform": "10", "where": None, "cancelled": False}
+        result = self.apns().send_activity("ab" * 32, "production", state, stale=1_001_200)
+        self.assertEqual(result, "ok")
+        h = self.requests[0].headers
+        self.assertEqual(h["apns-topic"], "com.jfcaba.platform.push-type.liveactivity")
+        self.assertEqual(h["apns-push-type"], "liveactivity")
+        self.assertEqual(h["apns-priority"], "5")
+        self.assertEqual(json.loads(self.requests[0].content), {"aps": {
+            "timestamp": int(self.now), "event": "update", "content-state": state, "stale-date": 1_001_200}})
+
+    def test_activity_end_and_priority(self):
+        state = {"departs": None, "status": "Cancelled", "platform": None, "where": None, "cancelled": True}
+        self.apns().send_activity("ab" * 32, "sandbox", state, event="end", priority=10,
+                                  stale=1_000_600, dismissal=1_000_900)
+        req = self.requests[0]
+        self.assertEqual(req.url.host, "api.sandbox.push.apple.com")
+        self.assertEqual(req.headers["apns-priority"], "10")
+        aps = json.loads(req.content)["aps"]
+        self.assertEqual((aps["event"], aps["dismissal-date"]), ("end", 1_000_900))
+
+    def test_activity_gone(self):
+        self.status = 410
+        state = {"departs": None, "status": "", "platform": None, "where": None, "cancelled": False}
+        self.assertEqual(self.apns().send_activity("ab" * 32, "production", state, stale=1), "gone")
+
     def test_sandbox_host(self):
         self.apns().send("cd" * 32, "sandbox", "t", "b")
         self.assertEqual(self.requests[0].url.host, "api.sandbox.push.apple.com")

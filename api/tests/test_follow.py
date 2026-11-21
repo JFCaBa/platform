@@ -639,3 +639,227 @@ class PollerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+ACT = "ef" * 32
+POS = {"lastStop": "Newport", "lastAt": "08:01", "stopsAway": 2}
+
+
+class ActivityPush(Push):
+    def __init__(self, result="ok", activity_result="ok"):
+        super().__init__(result)
+        self.activity_result = activity_result
+        self.activities: list[dict] = []
+
+    def send_activity(self, token, env, state, *, event="update", priority=5, stale, dismissal=None):
+        self.activities.append({"token": token, "env": env, "state": state, "event": event,
+                                "priority": priority, "stale": stale, "dismissal": dismissal})
+        return self.activity_result
+
+
+class Positions:
+    def __init__(self):
+        self.calls: list[str] = []
+        self.result: object = dict(POS)
+
+    def __call__(self, sid):
+        self.calls.append(sid)
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+class LiveActivityTest(unittest.TestCase):
+    def setUp(self):
+        from platform_api.follow import Poller
+        self.store = FollowStore()
+        self.boards = Boards()
+        self.push = ActivityPush()
+        self.clock = Clock()
+        self.positions = Positions()
+        self.poller = Poller(self.store, self.boards, self.push, fetch_position=self.positions, clock=self.clock)
+
+    def follow(self, activity=ACT, sid="S1", token=TOKEN):
+        t = train(sid=sid)
+        self.store.upsert(token, "production", t, dep(platform="3", etd="On time", sid=sid), self.clock.t,
+                          activity=activity)
+
+    def board(self, **kw):
+        self.boards.set("CDF", dep(sid="S1", **{"platform": "3", "etd": "On time", **kw}))
+
+    def test_update_pushed_on_change_only(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.poller.tick()
+        self.assertEqual(len(self.push.activities), 1)
+        a = self.push.activities[0]
+        self.assertEqual((a["token"], a["event"], a["priority"]), (ACT, "update", 5))
+        self.assertEqual(a["state"]["platform"], "3")
+        self.assertEqual(a["state"]["where"], "2 stops away · left Newport 08:01")
+        self.assertEqual(a["stale"], a["state"]["departs"] + 600)
+        self.board(platform="5")
+        self.clock.t += 30
+        self.poller.tick()
+        self.assertEqual(len(self.push.activities), 2)
+        self.assertEqual(self.push.activities[1]["priority"], 10)  # platform changed
+
+    def test_stale_without_departs(self):
+        self.follow()
+        self.board(etd="Delayed")
+        self.poller.tick()
+        self.assertIsNone(self.push.activities[0]["state"]["departs"])
+
+    def test_position_fetched_every_60s_and_error_keeps_last(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.clock.t += 30
+        self.poller.tick()
+        self.assertEqual(self.positions.calls, ["S1"])
+        self.clock.t += 30
+        self.positions.result = RuntimeError("darwin")
+        self.poller.tick()
+        self.assertEqual(self.positions.calls, ["S1", "S1"])
+        (f,) = self.store.for_station("CDF")
+        self.assertEqual(f.position, POS)
+        self.assertEqual(len(self.push.activities), 1)  # nothing changed
+
+    def test_no_service_id_no_position_call(self):
+        self.store.upsert(TOKEN, "production", train(), dep(platform="3", etd="On time"), self.clock.t, activity=ACT)
+        self.boards.set("CDF", dep(platform="3", etd="On time"))
+        self.poller.tick()
+        self.assertEqual(self.positions.calls, [])
+        self.assertIsNone(self.push.activities[0]["state"]["where"])
+
+    def test_no_activity_no_position_no_activity_push(self):
+        self.follow(activity=None)
+        self.board()
+        self.poller.tick()
+        self.assertEqual((self.positions.calls, self.push.activities), ([], []))
+
+    def test_late_activity_token_keeps_baseline(self):
+        self.follow(activity=None)
+        (before,) = self.store.for_station("CDF")
+        self.assertTrue(self.store.set_activity(TOKEN, train(sid="S1"), ACT))
+        (f,) = self.store.for_station("CDF")
+        self.assertEqual((f.activity, f.started, f.last), (ACT, before.started, before.last))
+        self.assertFalse(self.store.set_activity(TOKEN, train(sid="OTHER"), ACT))
+        self.board()
+        self.poller.tick()
+        self.assertEqual(self.push.sent, [])  # baseline kept: no alert
+        self.assertEqual(len(self.push.activities), 1)
+
+    def ends(self):
+        return [a for a in self.push.activities if a["event"] == "end"]
+
+    def test_end_when_train_leaves_board(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.boards.set("CDF")
+        self.poller.tick()
+        self.poller.tick()  # second miss removes it
+        self.poller.tick()
+        (end,) = self.ends()
+        self.assertEqual(end["dismissal"], int(self.clock.t) + 900)
+
+    def test_end_on_delete_once(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.store.remove(TOKEN)
+        self.poller.tick()
+        self.poller.tick()
+        (end,) = self.ends()
+        self.assertEqual(end["dismissal"], int(self.clock.t))
+
+    def test_end_after_three_hours(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.clock.t += 3 * 3600
+        self.poller.tick()
+        self.poller.tick()
+        self.assertEqual(len(self.ends()), 1)
+
+    def test_end_after_cancelled_linger(self):
+        self.follow()
+        self.board(etd="Cancelled", cancelled=True)
+        self.poller.tick()
+        self.clock.t += 121
+        self.poller.tick()
+        self.poller.tick()
+        (end,) = self.ends()
+        self.assertTrue(end["state"]["cancelled"])
+
+    def test_activity_gone_drops_only_activity(self):
+        self.push.activity_result = "gone"
+        self.follow()
+        self.board()
+        self.poller.tick()
+        (f,) = self.store.for_station("CDF")
+        self.assertIsNone(f.activity)
+        self.board(platform="5")
+        self.poller.tick()
+        self.assertEqual(len(self.push.sent), 1)  # alerts go on
+        self.assertEqual(len(self.push.activities), 1)
+
+    def test_replacing_train_ends_old_activity(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        other = train(std="09:00", sid="S2")
+        self.store.upsert(TOKEN, "production", other, dep(std="09:00", sid="S2"), self.clock.t, activity="aa" * 32)
+        self.poller.tick()
+        self.assertEqual([e["token"] for e in self.ends()], [ACT])
+
+
+class LiveActivityFixesTest(LiveActivityTest):
+    def test_late_token_during_tick_does_not_repeat_alert(self):
+        self.follow(activity=None)
+        self.board(platform="5")
+        orig = self.push.send
+
+        def send_and_attach(*a):
+            r = orig(*a)
+            self.store.set_activity(TOKEN, train(sid="S1"), ACT)  # the re-POST lands mid-tick
+            return r
+        self.push.send = send_and_attach
+        self.poller.tick()
+        self.push.send = orig
+        self.poller.tick()
+        self.assertEqual(len(self.push.sent), 1)  # "Platform changed" only once
+        self.assertEqual(len(self.push.activities), 1)  # the new activity got its state
+
+    def test_reused_activity_token_on_new_train_not_ended(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.store.upsert(TOKEN, "production", train(std="09:00", sid="S2"), dep(std="09:00", sid="S2"),
+                          self.clock.t, activity=ACT)
+        self.poller.tick()
+        self.assertEqual(self.ends(), [])
+
+    def test_failed_end_retried_then_dropped(self):
+        self.follow()
+        self.board()
+        self.poller.tick()
+        self.push.activity_result = "error"
+        self.store.remove(TOKEN)
+        for _ in range(5):
+            self.poller.tick()
+        self.assertEqual(len(self.ends()), 3)
+
+    def test_end_without_state_dismisses_now(self):
+        self.follow()
+        self.store.remove(TOKEN, dismiss_after=900)
+        self.poller.tick()
+        (end,) = self.ends()
+        self.assertEqual(end["dismissal"], int(self.clock.t))
+
+    def test_unknown_departs_stale_in_an_hour(self):
+        self.follow()
+        self.board(etd="Delayed")
+        self.poller.tick()
+        self.assertEqual(self.push.activities[0]["stale"], int(self.clock.t) + 3600)

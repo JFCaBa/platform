@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from platform_api.board import strip_html, to_board, to_stops  # noqa: E402
+from platform_api.board import strip_html, to_board, to_stops, train_position  # noqa: E402
 
 FIX = Path(__file__).parent / "fixtures"
 NOW = datetime(2026, 11, 16, 14, 34, tzinfo=timezone.utc)
@@ -162,6 +162,45 @@ class BoardTest(unittest.TestCase):
     def test_stops_none_when_no_calling_points(self):
         self.assertEqual(to_stops({"generatedAt": None}, "x", NOW)["portions"], [])
         self.assertEqual(to_stops({"subsequentCallingPoints": [None, {"callingPoint": []}]}, "x", NOW)["portions"], [])
+
+    @staticmethod
+    def _prev(*points):
+        return {"previousCallingPoints": [{"callingPoint": list(points)}]}
+
+    def test_position_last_passed_stop(self):
+        raw = self._prev({"locationName": "A", "st": "16:00", "at": "On time"},
+                         {"locationName": "B", "st": "16:10", "at": "16:12"},
+                         {"locationName": "C", "st": "16:20", "et": "On time"})
+        self.assertEqual(train_position(raw), {"lastStop": "B", "lastAt": "16:12", "stopsAway": 2})
+
+    def test_position_on_time_uses_st(self):
+        raw = self._prev({"locationName": "A", "st": "16:00", "at": "On time"})
+        self.assertEqual(train_position(raw), {"lastStop": "A", "lastAt": "16:00", "stopsAway": 1})
+
+    def test_position_not_started(self):
+        raw = self._prev({"locationName": "A", "st": "16:00", "et": "On time"},
+                         {"locationName": "B", "st": "16:10", "et": "16:12"})
+        self.assertEqual(train_position(raw), {"notStarted": "A"})
+
+    def test_position_no_report_is_not_passed(self):
+        raw = self._prev({"locationName": "A", "st": "16:00", "at": "16:01"},
+                         {"locationName": "B", "st": "16:10", "at": "No report"},
+                         {"locationName": "C", "st": "16:20", "at": "Cancelled"})
+        self.assertEqual(train_position(raw), {"lastStop": "A", "lastAt": "16:01", "stopsAway": 3})
+
+    def test_position_starts_here(self):
+        self.assertEqual(train_position({}), {"startsHere": True})
+        self.assertEqual(train_position({"previousCallingPoints": [None]}), {"startsHere": True})
+
+    def test_position_uses_first_portion_only(self):
+        raw = {"previousCallingPoints": [
+            {"callingPoint": [{"locationName": "A", "st": "16:00", "at": "On time"}]},
+            {"callingPoint": [{"locationName": "Joining", "st": "16:05", "at": "On time"},
+                              {"locationName": "J2", "st": "16:06", "et": "On time"}]}]}
+        self.assertEqual(train_position(raw), {"lastStop": "A", "lastAt": "16:00", "stopsAway": 1})
+
+    def test_to_stops_has_position(self):
+        self.assertEqual(to_stops({}, "x", NOW)["position"], {"startsHere": True})
 
     def test_input_not_mutated(self):
         raw = load("darwin_clj.json")

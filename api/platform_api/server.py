@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Collection, TextIO
 
 from .apns import Apns
-from .board import BASE_ROWS, HHMM, to_board, to_stops
+from .board import BASE_ROWS, HHMM, to_board, to_stops, train_position
 from .follow import MAX_DURATION, FollowStore, Poller, find_followed
 
 DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
@@ -130,6 +130,39 @@ def load_stations(url: str, fallback: Path) -> set[str]:
     return {s["crs"] for s in json.loads(fallback.read_text())["stations"]}
 
 
+class ServiceCache:
+    """Darwin Service Details answers, kept `ttl` seconds per service id: shared by /service/{id}
+    and the follow poller's position lookups. Errors are not kept."""
+
+    def __init__(self, ttl: float = 30.0, clock=time.time, max_entries: int = 2000) -> None:
+        self._ttl = ttl
+        self._clock = clock
+        self._max = max_entries
+        self._lock = threading.Lock()
+        self._items: dict[str, tuple[float, dict]] = {}
+
+    def peek(self, sid: str) -> dict | None:
+        now = self._clock()
+        with self._lock:
+            hit = self._items.get(sid)
+            return hit[1] if hit is not None and 0 <= now - hit[0] < self._ttl else None
+
+    def get(self, sid: str, load) -> dict:
+        now = self._clock()
+        with self._lock:
+            hit = self._items.get(sid)
+            if hit is not None and 0 <= now - hit[0] < self._ttl:
+                return hit[1]
+        value = load()
+        with self._lock:
+            if len(self._items) >= self._max:
+                self._items = {k: v for k, v in self._items.items() if 0 <= now - v[0] < self._ttl}
+                if len(self._items) >= self._max:
+                    self._items.clear()
+            self._items[sid] = (now, value)
+        return value
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 128  # default 5 resets bursts of connections
@@ -147,25 +180,28 @@ class _Server(ThreadingHTTPServer):
             pass
 
 
-def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, dict, int] | None:
-    """(token lowercased, env, train, startedAt ms) from a POST /follow body, or None if invalid."""
+def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, dict, int, str | None] | None:
+    """(token lowercased, env, train, startedAt ms, Live Activity token lowercased or None) from a
+    POST /follow body, or None if invalid."""
     if not isinstance(body, dict):
         return None
     token, env = body.get("token"), body.get("env")
     crs, std, dest = body.get("crs"), body.get("std"), body.get("destination")
     sid, started = body.get("serviceId"), body.get("startedAt")
+    activity = body.get("activityToken")
     if not (isinstance(token, str) and TOKEN_RE.fullmatch(token) and env in ENVS
             and isinstance(crs, str) and CRS_RE.fullmatch(crs) and crs in stations
             and isinstance(std, str) and HHMM.fullmatch(std)
             and isinstance(dest, str) and 0 < len(dest) <= MAX_DESTINATION
             and (sid is None or (isinstance(sid, str) and SERVICE_ID_RE.fullmatch(sid)))
             and isinstance(started, int) and not isinstance(started, bool)
-            and 0 <= started < MAX_STARTED_MS):
+            and 0 <= started < MAX_STARTED_MS
+            and (activity is None or (isinstance(activity, str) and TOKEN_RE.fullmatch(activity)))):
         return None
     train = {"crs": crs, "std": std, "destination": dest}
     if sid is not None:
         train["serviceId"] = sid
-    return token.lower(), env, train, started
+    return token.lower(), env, train, started, activity.lower() if activity else None
 
 
 def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations: Collection[str],
@@ -178,6 +214,26 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
     service_slots = threading.BoundedSemaphore(max(1, max_inflight // 2))
     # Follow POSTs and the poller share their own pool: following never takes a board's slot.
     poll_slots = threading.BoundedSemaphore(2)
+    services = ServiceCache(clock=clock)
+
+    def service_details(sid: str) -> dict:
+        return services.get(sid, lambda: fetch_darwin(f"{service_url}/{sid}", service_key, deadline_s))
+
+    def fetch_position(sid: str) -> dict:
+        """Where a followed train is, for the poller: from the shared cache, else one Service
+        Details call in the poll pool (Busy when no slot within `poll_wait_s`)."""
+        if not SERVICE_ID_RE.match(sid):
+            raise ValueError("bad service id")
+        cached = services.peek(sid)
+        if cached is not None:
+            return train_position(cached)
+        # A short wait: a slow lookup must not hold up the alerts of the rest of the tick.
+        if not poll_slots.acquire(timeout=min(1.0, poll_wait_s)):
+            raise Busy()
+        try:
+            return train_position(service_details(sid))
+        finally:
+            poll_slots.release()
 
     def fetch_board(crs: str, wait: float | None = None) -> dict:
         """One board reading for /follow and the poller. Waits for a poll slot up to `wait`
@@ -219,7 +275,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             if not service_slots.acquire(blocking=False):
                 return self.send_json(502, {"error": "busy"})
             try:
-                raw = fetch_darwin(f"{service_url}/{sid}", service_key, deadline_s)
+                raw = service_details(sid)
                 body = to_stops(raw, attribution, datetime.now(timezone.utc))
             except Upstream as e:
                 log.write(f"upstream service {e.status}\n")
@@ -313,11 +369,13 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             req = _follow_request(body, self.server.stations) if ok else None
             if req is None:
                 return self.send_json(400, {"error": "bad request"})
-            token, env, train, started_ms = req
+            token, env, train, started_ms, activity = req
             now = clock()
             if now - started_ms / 1000 >= MAX_DURATION:
                 return self.send_json(410, {"error": "gone"})
             if follows.is_same(token, train, env):  # app re-sync: keep baseline and original start
+                if activity:
+                    follows.set_activity(token, train, activity)
                 return self.send_json(200, {"ok": True})
             epoch = follows.epoch(token)  # a DELETE (or another POST) while we read Darwin wins
             try:
@@ -334,7 +392,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             if found is None:
                 return self.send_json(410, {"error": "gone"})
             started = min(max(started_ms / 1000, now - MAX_DURATION), now)
-            result = follows.upsert(token, env, train, found, started, expect_epoch=epoch)
+            result = follows.upsert(token, env, train, found, started, expect_epoch=epoch, activity=activity)
             if result == "stale":
                 return self.send_json(409, {"error": "conflict"})
             if result != "ok":
@@ -361,6 +419,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
     httpd.slots = slots
     httpd.poll_slots = poll_slots
     httpd.fetch_board = fetch_board
+    httpd.fetch_position = fetch_position if service_url and service_key else None
     return httpd
 
 
@@ -383,7 +442,7 @@ def main(env: dict | None = None) -> int:
                         attribution=ATTRIBUTION, follows=follows, push=push)
     if push is not None:
         stop = threading.Event()
-        poller = Poller(follows, httpd.fetch_board, push)
+        poller = Poller(follows, httpd.fetch_board, push, fetch_position=httpd.fetch_position)
         threading.Thread(target=poller.run, args=(stop,), daemon=True).start()
 
     def refresh():
