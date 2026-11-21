@@ -118,3 +118,10 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - 20-11-2026: Play Alpha **11 (1.3.0)** guardada (AAB subido por el usuario) y ficha guardada (declaración de IA:
   "Don't label assets", decidido por el usuario). Publishing overview: **4 cambios sin enviar** (Alpha 11, descripción,
   capturas, gráfico destacado); la 9 sigue In review. "Submit 4 changes for review" lo pulsa el usuario.
+
+
+## 1.4.0 (12) — tu tren en vivo (21-11-2026)
+- API desplegada (022a24e): `/service/{id}` con `position`; Live Activity por push; tokens de actividad hasta 512 hex.
+- iOS: build 12 subido a App Store Connect (incluye la extensión FollowActivity, App ID com.jfcaba.platform.FollowActivity creado por firma automática). Falta: crear la versión 1.4.0 en ASC, asignar el build 12, novedades (listing-en.md) y probar en iPhone real por TestFlight (pantalla de bloqueo y Dynamic Island).
+- Android: AAB 12 en app/build/app/outputs/bundle/release/app-release.aab (52,4 MB). Lo sube el usuario.
+- Política de privacidad actualizada (token de la Live Activity, solo en memoria).
