@@ -144,3 +144,8 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
   (1.4.0) Ready to publish. What Platform is under the jfcaba68 Google account (Play Console u/1).
 - Ship after 1.4.0 (12) is approved: merge to main, archive, AAB.
 - Notes for the stores (draft): "New home screen widget: your next trains and platforms at a glance."
+
+## 1.5.0 (14) — About button (22-11-2026)
+
+- iOS build 14 uploaded to App Store Connect. AAB 1.5.0 (14) uploaded by the user to a new internal testing release
+  ("14 (1.5.0)", en-GB notes: widget + About button), saved as draft. To do (user): Next and start rollout.
