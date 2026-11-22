@@ -148,4 +148,4 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 ## 1.5.0 (14) — About button (22-11-2026)
 
 - iOS build 14 uploaded to App Store Connect. AAB 1.5.0 (14) uploaded by the user to a new internal testing release
-  ("14 (1.5.0)", en-GB notes: widget + About button), saved as draft. To do (user): Next and start rollout.
+  ("14 (1.5.0)", en-GB notes: widget + About button), rolled out by the user on 22-11-2026.
