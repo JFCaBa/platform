@@ -137,5 +137,7 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - No new data collected: App Privacy unchanged.
 - Verified: Android emulator (gallery preview, real Euston board, worker fetch); iOS simulator build
   and renders. Real iPhone pending.
+- 22-11-2026 17:27: iOS build 1.5.0 (13) uploaded to App Store Connect for TestFlight (from the
+  branch; App Group entitlement on app and extension checked). Not assigned to any version.
 - Ship after 1.4.0 (12) is approved: merge to main, archive, AAB.
 - Notes for the stores (draft): "New home screen widget: your next trains and platforms at a glance."
