@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:home_widget/home_widget.dart';
 import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,6 +19,7 @@ import 'follow/push_follower.dart';
 import 'follow/push_token.dart';
 import 'location.dart';
 import 'ui/home_screen.dart';
+import 'widget/home_widget.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +54,13 @@ Future<void> main() async {
           fetchService: departures.fetchService,
           clock: () => DateTime.now().toUtc(),
         );
+  // Home screen widget: station, filters and the latest board (the widget refreshes it itself).
+  if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
+    if (Platform.isIOS) await HomeWidget.setAppGroupId(widgetAppGroup);
+    final publisher = WidgetPublisher();
+    controller.addListener(
+        () => publisher.publish(controller.station, controller.filters, controller.board, controller.services));
+  }
   runApp(PlatformApp(controller: controller, follower: follower, tracker: tracker, fetchStops: departures.fetchStops));
 }
 

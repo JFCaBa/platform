@@ -125,3 +125,17 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - iOS: build 12 subido a App Store Connect (incluye la extensión FollowActivity, App ID com.jfcaba.platform.FollowActivity creado por firma automática). Falta: crear la versión 1.4.0 en ASC, asignar el build 12, novedades (listing-en.md) y probar en iPhone real por TestFlight (pantalla de bloqueo y Dynamic Island).
 - Android: AAB 12 en app/build/app/outputs/bundle/release/app-release.aab (52,4 MB). Lo sube el usuario.
 - Política de privacidad actualizada (token de la Live Activity, solo en memoria).
+
+## 1.5.0 (13) — home screen widget (22-11-2026, branch feat/home-widget)
+
+- iOS (small: time + platform; medium: time, destination, platform, countdown) and Android (4x2,
+  resizable) widget with the next 4 trains of the last station opened, with its destination filters.
+- Refreshes by itself: fetches `/departures/{CRS}` (iOS timeline every ~15 min; Android WorkManager
+  every 15 min with network). Gallery preview with a London Euston sample.
+- App Group `group.com.jfcaba.platform` added to Runner and FollowActivity (Xcode registers it on the
+  first archive with -allowProvisioningUpdates).
+- No new data collected: App Privacy unchanged.
+- Verified: Android emulator (gallery preview, real Euston board, worker fetch); iOS simulator build
+  and renders. Real iPhone pending.
+- Ship after 1.4.0 (12) is approved: merge to main, archive, AAB.
+- Notes for the stores (draft): "New home screen widget: your next trains and platforms at a glance."
