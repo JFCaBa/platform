@@ -139,5 +139,8 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
   and renders. Real iPhone pending.
 - 22-11-2026 17:27: iOS build 1.5.0 (13) uploaded to App Store Connect for TestFlight (from the
   branch; App Group entitlement on app and extension checked). Not assigned to any version.
+- 22-11-2026: Play internal testing (first use of the track) draft release 13 (1.5.0) saved, AAB
+  uploaded by the user, notes en-GB. Pending (user): testers list, Next → roll out. Alpha keeps 12
+  (1.4.0) Ready to publish. What Platform is under the jfcaba68 Google account (Play Console u/1).
 - Ship after 1.4.0 (12) is approved: merge to main, archive, AAB.
 - Notes for the stores (draft): "New home screen widget: your next trains and platforms at a glance."
