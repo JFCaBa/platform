@@ -49,7 +49,7 @@ class FakeDarwin:
                     if fake.mode == "429":
                         self.send_response(429)
                         self.end_headers()
-                    elif fake.mode == "error":
+                    elif fake.mode == "error" or (fake.mode == "brokenboard" and "timeOffset" not in self.path):
                         self.send_response(500)
                         self.end_headers()
                     elif fake.mode == "sleep":
@@ -153,6 +153,15 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 502)
         self.assertEqual(json.loads(body), {"error": "upstream"})
         self.assertNotIn("max-age=30", headers.get("cache-control", ""))
+
+    def test_broken_board_is_read_in_slices(self):
+        # Darwin 500s a whole board when one train has broken data (KGX, 22-11-2026).
+        self.darwin.mode = "brokenboard"
+        status, _, body = self.get("/departures/KGX")
+        self.assertEqual(status, 200)
+        self.assertGreater(len(json.loads(body)["services"]), 0)
+        self.assertTrue(any("numRows=50&timeWindow=10&timeOffset=0" in p for p in self.darwin.paths))
+        self.assertIn("upstream KGX 500, sliced", self.log.getvalue())
 
     def test_darwin_timeout_502_within_10s(self):
         for mode in ["sleep", "drip", "headerdrip"]:

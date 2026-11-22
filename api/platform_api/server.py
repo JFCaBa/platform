@@ -2,7 +2,8 @@
 GET /departures/{CRS}/{OFFSET} → the trains from OFFSET (1..119) minutes ahead, GET /health,
 POST/DELETE /follow → push alerts (APNs) for one followed train per device.
 
-Privacy: requests are not logged. Logged: Darwin failures (station code + reason),
+Privacy: requests are not logged. Logged: Darwin failures (station code + reason; a board
+read in slices after a 500 logs its station and the minutes dropped),
 `apns <status> <reason>` / `apns network <Class>`, `follow poller: <Class>`, `unhandled <Class>`,
 and one startup line `follow: on|off`. Never device tokens, trains or client addresses.
 Follows live in memory only.
@@ -27,8 +28,9 @@ from pathlib import Path
 from typing import Collection, TextIO
 
 from .apns import Apns
-from .board import BASE_ROWS, HHMM, to_board, to_stops, train_position
+from .board import BASE_ROWS, HHMM, darwin_window, to_board, to_stops, train_position
 from .follow import MAX_DURATION, FollowStore, Poller, find_followed
+from .slices import NoSlice, board_in_slices
 
 DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
               "/LDBWS/api/20220120/GetDepartureBoard")
@@ -209,7 +211,7 @@ def _follow_request(body: object, stations: Collection[str]) -> tuple[str, str, 
 def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations: Collection[str],
                 attribution: str, service_url: str | None = None, service_key: str | None = None, deadline_s: float = 8.0, max_inflight: int = 8,
                 log: TextIO = sys.stderr, follows: FollowStore | None = None, push=None,
-                follow_wait_s: float = 5.0, poll_wait_s: float = 10.0,
+                follow_wait_s: float = 5.0, poll_wait_s: float = 10.0, slice_budget_s: float = 10.0,
                 clock=time.time) -> ThreadingHTTPServer:
     slots = threading.BoundedSemaphore(max_inflight)
     # Stop lookups have their own, smaller pool: they must never leave the boards without a slot.
@@ -217,6 +219,9 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
     # Follow POSTs and the poller share their own pool: following never takes a board's slot.
     poll_slots = threading.BoundedSemaphore(2)
     services = ServiceCache(clock=clock)
+    # Slice calls after a 500 (slices.py), across all boards: a station with a broken train must
+    # not multiply the load on a Darwin that is already failing.
+    slice_slots = threading.BoundedSemaphore(4)
 
     def service_details(sid: str) -> dict:
         return services.get(sid, lambda: fetch_darwin(f"{service_url}/{sid}", service_key, deadline_s))
@@ -237,6 +242,36 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
         finally:
             poll_slots.release()
 
+    def board_raw(crs: str, query: str, offset: int, rows: int) -> tuple[dict, int]:
+        """Darwin's board and how many minutes of its window are missing. On a 500 (one train
+        with broken data fails the whole board, see slices.py) the same window again in slices,
+        without the ones that keep failing, within `slice_budget_s` of the first call."""
+        started = time.monotonic()
+        try:
+            return fetch_darwin(f"{darwin_url}/{crs}{query}", api_key, deadline_s), 0
+        except Upstream as e:
+            if e.status != 500:
+                raise
+            first = e
+
+        def get(o: int, w: int, left: float) -> dict:
+            if not slice_slots.acquire(timeout=left):
+                raise Upstream("busy")
+            try:
+                return fetch_darwin(f"{darwin_url}/{crs}?numRows={rows}&timeWindow={w}&timeOffset={o}",
+                                    api_key, min(deadline_s, left))
+            finally:
+                slice_slots.release()
+
+        budget = slice_budget_s - (time.monotonic() - started)
+        try:
+            raw, dropped = board_in_slices(get, offset, darwin_window(offset), rows, budget,
+                                           lambda e: isinstance(e, Upstream) and e.status == 500)
+        except NoSlice:
+            raise first from None
+        log.write(f"upstream {crs} 500, sliced: {dropped} min dropped\n")
+        return raw, dropped
+
     def fetch_board(crs: str, wait: float | None = None) -> dict:
         """One board reading for /follow and the poller. Waits for a poll slot up to `wait`
         seconds (the poller's `poll_wait_s` when not given), else Busy: the poller then skips
@@ -244,7 +279,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
         if not poll_slots.acquire(timeout=poll_wait_s if wait is None else wait):
             raise Busy()
         try:
-            raw = fetch_darwin(f"{darwin_url}/{crs}{QUERY}", api_key, deadline_s)
+            raw, _ = board_raw(crs, QUERY, 0, BASE_ROWS)
             return to_board(raw, crs, attribution, datetime.now(timezone.utc))
         finally:
             poll_slots.release()
@@ -323,8 +358,10 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 # backs off for minutes on a real Darwin 429.
                 return self.send_json(502, {"error": "busy"})
             try:
-                raw = fetch_darwin(f"{darwin_url}/{crs}{query}", api_key, deadline_s)
+                raw, dropped = board_raw(crs, query, offset, rows)
                 board = to_board(raw, crs, attribution, datetime.now(timezone.utc), offset=offset, rows=rows)
+                if dropped:
+                    board["complete"] = False  # minutes missing: the window is not all listed
             except Upstream as e:
                 log.write(f"upstream {crs} {e.status}\n")
                 if e.status == 429:
