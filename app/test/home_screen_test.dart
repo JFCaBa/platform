@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:platform_app/app_controller.dart';
 import 'package:platform_app/config.dart';
 import 'package:platform_app/data/departures.dart';
@@ -71,6 +72,20 @@ void main() {
     expect(find.text('Data: National Rail'), findsOneWidget);
     await tester.tap(find.text('Privacy'));
     expect(opened, [Uri.parse(privacyUrl)]);
+  });
+
+  testWidgets('the About button shows version, data source and privacy without scrolling', (tester) async {
+    PackageInfo.setMockInitialValues(
+        appName: 'What Platform', packageName: 'com.jfcaba.platform', version: '1.5.0', buildNumber: '13', buildSignature: '');
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('About'));
+    await tester.pumpAndSettle();
+    expect(find.text('Version 1.5.0 (13)'), findsOneWidget);
+    expect(find.text('Data: National Rail'), findsWidgets);
+    await tester.tap(find.text('Privacy policy'));
+    await tester.pumpAndSettle();
+    expect(opened, [Uri.parse(privacyUrl)]);
+    expect(find.text('Version 1.5.0 (13)'), findsNothing);
   });
 
   testWidgets('first train that runs is the large card; cancelled ones stay rows', (tester) async {
