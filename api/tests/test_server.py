@@ -901,6 +901,12 @@ class StatsServerTest(unittest.TestCase):
         self.assertEqual(self.request("POST", self.body(**LEEDS))[0], 200)
         self.assertEqual(sum(d.follows for d in self.tally.drain(self.now)), 1)
 
+    def test_env_change_same_train_not_counted(self):
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        self.tally.drain(self.now)
+        self.assertEqual(self.request("POST", self.body(env="production"))[0], 200)  # skips is_same
+        self.assertEqual(sum(d.follows for d in self.tally.drain(self.now)), 0)
+
     def test_follow_ok_when_add_follow_raises(self):
         class Broken(Tally):
             def add_follow(self, ts):
@@ -974,6 +980,27 @@ class StatsServerTest(unittest.TestCase):
         self.assertFalse(t.is_alive())
         self.assertEqual(self.db.days(None)[0]["requests"], 1)
 
+    def test_flusher_stop_after_failure_drains_rest(self):
+        class Flaky(StatsDB):
+            fails = 1
+
+            def apply(self, deltas):
+                if self.fails:
+                    self.fails -= 1
+                    raise sqlite3.OperationalError("locked")
+                super().apply(deltas)
+
+        db = Flaky(Path(self.tmp.name) / "flaky2.db")
+        self.addCleanup(db.close)
+        tally = Tally()
+        tally.add(stats_hit(D_TS))
+        stop, t, _ = self.flusher(db, tally, lambda: D_TS + 60, every=0.05)
+        self.assertTrue(wait_until(lambda: "OperationalError" in self.log.getvalue()))
+        tally.add(stats_hit(D_TS + 1))  # arrives while the first batch is pending
+        stop.set()
+        t.join(5)
+        self.assertEqual(db.days(None)[0]["requests"], 2)
+
     def test_departures_unaffected_when_stats_broken(self):
         class Broken(StatsDB):
             def apply(self, deltas):
@@ -992,3 +1019,4 @@ class StatsServerTest(unittest.TestCase):
         c.close()
         stop.set()
         t.join(5)
+

@@ -179,7 +179,7 @@ class FollowStore:
 
     def upsert(self, token: str, env: str, train: dict, baseline: dict, started: float,
                expect_epoch: int | None = None, activity: str | None = None) -> str:
-        """"ok", "busy" (caps), or "stale" when `expect_epoch` is given and the token's epoch
+        """"ok" (a new follow), "renewed" (same train again: state kept), "busy" (caps), or "stale" when `expect_epoch` is given and the token's epoch
         has changed since (nothing is written then)."""
         crs = train.get("crs")
         if not isinstance(crs, str) or not crs:
@@ -199,7 +199,7 @@ class FollowStore:
                     cur.act_gen += 1
                     cur.activity, cur.state = activity, None
                 self._bump(token)
-                return "ok"
+                return "renewed"
             if cur is None and len(self._follows) >= self._max_follows:
                 return "busy"
             stations = {f.train.get("crs") for t, f in self._follows.items() if t != token}

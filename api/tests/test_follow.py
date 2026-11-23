@@ -59,7 +59,7 @@ class FollowStoreTest(unittest.TestCase):
         s = FollowStore()
         self.assertEqual(s.upsert("aa", "production", train(), {"platform": "1"}, 900.0), "ok")
         gen = s.for_station("CDF")[0].gen
-        self.assertEqual(s.upsert("aa", "production", train(), {"platform": "9"}, 960.0), "ok")
+        self.assertEqual(s.upsert("aa", "production", train(), {"platform": "9"}, 960.0), "renewed")
         (f,) = s.for_station("CDF")
         self.assertEqual(f.last, {"platform": "1"})
         self.assertEqual(f.started, 900.0)
@@ -71,7 +71,7 @@ class FollowStoreTest(unittest.TestCase):
         s.upsert("aa", "production", train(), {"platform": "1"}, 900.0)
         gen = s.for_station("CDF")[0].gen
         s.update("aa", gen, missing=1, cancelled_at=950.0)
-        self.assertEqual(s.upsert("aa", "sandbox", train(), {"platform": "9"}, 960.0), "ok")
+        self.assertEqual(s.upsert("aa", "sandbox", train(), {"platform": "9"}, 960.0), "renewed")
         (f,) = s.for_station("CDF")
         self.assertEqual((f.env, f.last, f.started, f.missing, f.cancelled_at),
                          ("sandbox", {"platform": "1"}, 900.0, 1, 950.0))
@@ -107,7 +107,7 @@ class FollowStoreTest(unittest.TestCase):
         for i in range(3):
             self.assertEqual(s.upsert(f"t{i}", "production", train(), {}, 1.0), "ok")
         self.assertEqual(s.upsert("t3", "production", train(), {}, 1.0), "busy")
-        self.assertEqual(s.upsert("t0", "production", train(), {}, 1.0), "ok")
+        self.assertEqual(s.upsert("t0", "production", train(), {}, 1.0), "renewed")
         self.assertEqual(s.upsert("t0", "production", train(std="10:00"), {}, 1.0), "ok")
         self.assertEqual(len(s), 3)
 

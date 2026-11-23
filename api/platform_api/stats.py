@@ -153,8 +153,11 @@ class Tally:
             if self._roll(london_day(ts)):
                 self._today().follows += 1
 
-    def visitors_today(self) -> int:
+    def visitors_today(self, now: float | None = None) -> int:
+        """People counted so far today; 0 when `now` is already a later day than the set's."""
         with self._lock:
+            if now is not None and self._day is not None and london_day(now) != self._day:
+                return 0
             return len(self._seen)
 
     def drain(self, now: float) -> list[Delta]:

@@ -110,6 +110,12 @@ class TallyTest(unittest.TestCase):
         self.assertEqual(d.visitors, 1)
         self.assertEqual(t.visitors_today(), 1)
 
+    def test_visitors_today_after_midnight_without_traffic(self):
+        t = Tally()
+        t.add(hit(utc(*D, 23)))
+        self.assertEqual(t.visitors_today(utc(*D, 23, 30)), 1)
+        self.assertEqual(t.visitors_today(utc(*D1, 0, 0, 10)), 0)  # not rolled yet: still yesterday's set
+
     def test_follows(self):
         t = Tally()
         t.add_follow(utc(*D, 10))

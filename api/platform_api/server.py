@@ -347,7 +347,7 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                     and hmac.compare_digest(given.encode(), admin_key.encode())):
                 return self.send_json(404, {"error": "not found"})
             today = london_day(clock())
-            page = render_page(summary(stats_db, today, rng, stats_db.visitors_base(today) + stats.visitors_today(),
+            page = render_page(summary(stats_db, today, rng, stats_db.visitors_base(today) + stats.visitors_today(clock()),
                                        len(follows) if follows is not None else 0, station_names or {}))
             data = page.encode()
             self.send_response(200)
@@ -467,9 +467,9 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
             result = follows.upsert(token, env, train, found, started, expect_epoch=epoch, activity=activity)
             if result == "stale":
                 return self.send_json(409, {"error": "conflict"})
-            if result != "ok":
+            if result not in ("ok", "renewed"):
                 return self.send_json(503, {"error": "busy"})
-            if stats is not None:
+            if stats is not None and result == "ok":
                 try:
                     stats.add_follow(now)
                 except Exception as e:  # stats never break following
@@ -524,14 +524,17 @@ def run_flusher(tally: Tally, db: StatsDB, backup_dir: Path, stop: threading.Eve
     backups: list[str] = []
     while True:
         stopping = stop.wait(every)
-        try:
-            if not pending:
-                pending = tally.drain(clock())
-            db.apply(pending)
-            backups += [d.day for d in pending if d.closed]
-            pending = []
-        except Exception as e:
-            log.write(f"stats: {type(e).__name__}\n")
+        # Stopping: a second round stores what arrived while a failed batch was pending.
+        for _ in range(2 if stopping else 1):
+            try:
+                if not pending:
+                    pending = tally.drain(clock())
+                db.apply(pending)
+                backups += [d.day for d in pending if d.closed]
+                pending = []
+            except Exception as e:
+                log.write(f"stats: {type(e).__name__}\n")
+                break
         while backups:
             try:
                 db.backup(backup_dir, backups[0])
