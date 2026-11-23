@@ -5,7 +5,7 @@ Layout: `/opt/platform/repo` (clone), `/opt/platform/.env` (root, 600: `DARWIN_A
 
 Relies on what this server already has for its other sites: `snippets/block-bad-bots.conf`, `snippets/honeypot.conf`,
 `/etc/letsencrypt/options-ssl-nginx.conf`, `/etc/letsencrypt/ssl-dhparams.pem` and the `/var/www/certbot` webroot.
-API container listens on `127.0.0.1:8510`; nginx in front (TLS, 30 s cache per station, no access log).
+API container listens on `127.0.0.1:8510` (and UDP `127.0.0.1:8511` for stats); nginx in front (TLS, 30 s cache per station, no access log on disk).
 
 ## First install
 
@@ -24,6 +24,31 @@ sudo certbot certonly --webroot -w /var/www/certbot -d whatplatform.uk -d www.wh
 sudo cp /etc/nginx/sites-available/whatplatform.uk.conf /etc/nginx/sites-enabled/whatplatform.uk.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+## Stats (`/admin`)
+
+nginx sends each What Platform API request over UDP to `127.0.0.1:8511` (syslog, no file on
+disk); the API keeps only aggregates in `/opt/platform/stats/stats.db` and shows them at
+`https://api.whatplatform.uk/admin` behind a password. Once:
+
+```sh
+sudo install -d -o 10001 -g 10001 -m 700 /opt/platform/stats            # API's uid in the image
+KEY=$(openssl rand -hex 32)
+printf '\nADMIN_KEY=%s\n' "$KEY" | sudo tee -a /opt/platform/.env >/dev/null   # leading \n: .env may lack one
+echo "proxy_set_header X-Admin-Key \"$KEY\";" | sudo tee /etc/nginx/platform-admin-key.conf >/dev/null
+sudo chmod 600 /etc/nginx/platform-admin-key.conf; unset KEY
+sudo apt-get install -y apache2-utils                                     # htpasswd, if missing
+sudo htpasswd -c /etc/nginx/platform-admin.htpasswd <user>                # you choose user + password
+```
+
+Then the usual update (API + nginx). Check: `curl -s -A platform-check https://api.whatplatform.uk/departures/KGX`,
+then open `/admin` (401 without the password); the request shows up within a minute. Daily backups
+(7 kept) in `/opt/platform/stats/backups`. Without `ADMIN_KEY` `/admin` answers 404; if the DB cannot be
+opened the API logs `stats: off` and serves the rest as usual.
+
+If nothing arrives (Docker's UDP publishing on 127.0.0.1): publish `172.17.0.1:8511:8511/udp` and point
+nginx's `syslog:server=` at `172.17.0.1:8511`, or as a last resort `network_mode: host` for the API
+container. The receiver must stay in the API process (it shares the in-memory tally with `/admin`).
 
 ## Update
 

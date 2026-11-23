@@ -125,3 +125,18 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - iOS: build 12 subido a App Store Connect (incluye la extensión FollowActivity, App ID com.jfcaba.platform.FollowActivity creado por firma automática). Falta: crear la versión 1.4.0 en ASC, asignar el build 12, novedades (listing-en.md) y probar en iPhone real por TestFlight (pantalla de bloqueo y Dynamic Island).
 - Android: AAB 12 en app/build/app/outputs/bundle/release/app-release.aab (52,4 MB). Lo sube el usuario.
 - Política de privacidad actualizada (token de la Live Activity, solo en memoria).
+
+## Estadísticas de uso en el servidor (23-11-2026)
+
+Página `/admin` (spec `docs/superpowers/specs/2026-11-23-admin-stats-design.md`). Política
+actualizada (sin «no analytics»; recuento anónimo explicado). Revisión de las etiquetas de
+privacidad de las tiendas, conclusión de Claude: **sin cambios**.
+- App Store (App Privacy): lo que se guarda son totales por estación, hora, versión y día; no son
+  datos de un usuario ni ligados a un dispositivo. La IP se usa en memoria para contar
+  visitantes únicos y no se guarda. Sigue «Device ID · Not Linked · App Functionality» solo por
+  el seguimiento en iPhone.
+- Google Play (Data safety): la IP se procesa de forma efímera (en memoria, con clave diaria
+  que se borra); no se recoge ni comparte.
+- Matiz: los hashes del día viven en memoria hasta medianoche. Si Apple o Google preguntan,
+  la respuesta es que es un recuento agregado sin identificador persistente.
+

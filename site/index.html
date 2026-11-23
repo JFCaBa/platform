@@ -20,19 +20,20 @@
   <p class="muted">The next trains and their platform at your nearest station in Great Britain.</p>
 
   <h2>Privacy policy</h2>
-  <p><strong>We don't collect personal data such as your name, account, location or contacts.</strong> The app has no accounts, no ads, no analytics and no tracking. The one exception: if you follow a train on an iPhone, its push token (a pseudonymous device identifier) is kept on our server for a few hours (see below).</p>
+  <p><strong>We don't collect personal data such as your name, account, location or contacts.</strong> The app has no accounts, no ads and no tracking; our server only counts anonymous usage (see below). The one exception: if you follow a train on an iPhone, its push token (a pseudonymous device identifier) is kept on our server for a few hours (see below).</p>
 
   <h2>Your location</h2>
   <p>If you allow it, the app uses your location <strong>only on your phone</strong> to find the nearest station. Your location is never sent to us or to anyone else. You can say no and pick a station by hand.</p>
 
   <h2>What our server receives</h2>
-  <p>To show departures, the app asks our server for the departures of one station, identified by its three-letter code (for example <code>KGX</code>). To show a train's stops, it asks for that train by the code National Rail gives it for the day. That is all these requests contain. Our server keeps no logs of these requests and does not record your IP address.</p>
+  <p>To show departures, the app asks our server for the departures of one station, identified by its three-letter code (for example <code>KGX</code>). To show a train's stops, it asks for that train by the code National Rail gives it for the day. That is all these requests contain. Our server keeps no logs of these requests.</p>
+  <p>We count how many times each station is requested, per hour and day, and which version of the app asks. To count how many different people use the app each day, your IP address and app version are combined for an instant with a random key that is deleted every day, in a way that cannot be reversed; only the daily totals are kept. Your IP address is never stored.</p>
 
   <h2>Following a train (Android)</h2>
   <p>When you follow a train, your phone keeps asking our server for that station's departures every 30 seconds, in the same way as above, until the train leaves (at most 3 hours) or you tap Stop. Android shows a notification while this runs. The alerts about platform, time or cancellation changes are created on your phone; nothing is sent to us to receive them, and we never know which train you follow.</p>
 
   <h2>Following a train (iPhone)</h2>
-  <p>On iPhone, following a train sends your device's push token, the push token of its lock-screen Live Activity, and the train you follow to our server, so that it can send you the alerts and keep the Live Activity up to date. They are kept only in the server's memory and deleted when the train leaves, 2 minutes after it is cancelled, after 3 hours or when you stop following. Apple's push service delivers the alerts and updates to your iPhone. Nothing else is stored or logged on our server.</p>
+  <p>On iPhone, following a train sends your device's push token, the push token of its lock-screen Live Activity, and the train you follow to our server, so that it can send you the alerts and keep the Live Activity up to date. They are kept only in the server's memory and deleted when the train leaves, 2 minutes after it is cancelled, after 3 hours or when you stop following. Apple's push service delivers the alerts and updates to your iPhone. Apart from the anonymous counts described above, nothing else is stored or logged on our server.</p>
 
   <h2>What stays on your phone</h2>
   <p>The last station you looked at, your destination filters and the train you follow are stored on your phone so the app opens where you left it. They never leave the device, except the train you follow on iPhone, as described above. Deleting the app deletes them.</p>
@@ -43,7 +44,7 @@
   <h2>Contact</h2>
   <p>Questions: open an issue at <a href="https://github.com/JFCaBa/platform/issues">github.com/JFCaBa/platform</a>.</p>
 
-  <p class="muted">Last updated 21 November 2026.</p>
+  <p class="muted">Last updated 23 November 2026.</p>
 </main>
 </body>
 </html>
