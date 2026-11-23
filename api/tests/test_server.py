@@ -3,6 +3,7 @@ import http.client
 import io
 import json
 import socket
+import sqlite3
 import struct
 import sys
 import threading
@@ -818,3 +819,176 @@ class StationsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from platform_api.stats import Hit, Tally  # noqa: E402
+from platform_api.stats_db import StatsDB  # noqa: E402
+
+LEEDS = {"crs": "KGX", "std": "14:10", "destination": "Leeds", "serviceId": "10749482KNGX____"}
+D_TS = 1_795_413_600.0  # 2026-11-23 06:00 London (GMT)
+
+
+def stats_hit(ts):
+    return Hit(ts, "departures", "KGX", "1.2.3.4", "WhatPlatform/1.5")
+
+
+def wait_until(cond, timeout=5.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+class StatsServerTest(unittest.TestCase):
+    serve = FollowTest.serve
+    request = FollowTest.request
+    body = FollowTest.body
+
+    def setUp(self):
+        import tempfile
+        self.darwin = FakeDarwin()
+        self.addCleanup(self.darwin.httpd.server_close)
+        self.addCleanup(self.darwin.httpd.shutdown)
+        self.log = io.StringIO()
+        self.now = 1_800_000_000.0
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = StatsDB(Path(self.tmp.name) / "s.db")
+        self.addCleanup(self.db.close)
+        self.tally = Tally()
+        self.store = FollowStore()
+        self.api = self.serve(follows=self.store, push=FakePush(), stats=self.tally, stats_db=self.db,
+                              admin_key="s3cret", station_names={"KGX": "London Kings Cross"})
+
+    def admin(self, headers=None, path="/admin", api=None):
+        api = api or self.api
+        c = http.client.HTTPConnection("127.0.0.1", api.server_address[1], timeout=30)
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        body = r.read()
+        c.close()
+        return r.status, dict((k.lower(), v) for k, v in r.getheaders()), body
+
+    def test_admin_404_without_key(self):
+        api = self.serve(stats=self.tally, stats_db=self.db, admin_key="")
+        self.assertEqual(self.admin({"X-Admin-Key": ""}, api=api)[0], 404)
+        self.assertEqual(self.admin({"X-Admin-Key": "anything"}, api=api)[0], 404)
+
+    def test_admin_404_wrong_key(self):
+        self.assertEqual(self.admin({"X-Admin-Key": "nope"})[0], 404)
+        self.assertEqual(self.admin()[0], 404)
+
+    def test_admin_ok(self):
+        status, headers, body = self.admin({"X-Admin-Key": "s3cret"}, path="/admin?range=30d")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["content-type"].startswith("text/html"))
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertIn("default-src 'none'", headers["content-security-policy"])
+        self.assertIn(b"Top stations", body)
+        self.assertIn(b'class=on>30 days', body)
+
+    def test_admin_404_without_stats(self):
+        api = self.serve(admin_key="s3cret")
+        self.assertEqual(self.admin({"X-Admin-Key": "s3cret"}, api=api)[0], 404)
+
+    def test_follow_new_counts_renewal_not(self):
+        self.assertEqual(self.request("POST", self.body())[0], 200)
+        self.assertEqual(sum(d.follows for d in self.tally.drain(self.now)), 1)
+        self.assertEqual(self.request("POST", self.body())[0], 200)  # same train: app re-sync
+        self.assertEqual(sum(d.follows for d in self.tally.drain(self.now)), 0)
+        self.assertEqual(self.request("POST", self.body(**LEEDS))[0], 200)
+        self.assertEqual(sum(d.follows for d in self.tally.drain(self.now)), 1)
+
+    def test_follow_ok_when_add_follow_raises(self):
+        class Broken(Tally):
+            def add_follow(self, ts):
+                raise RuntimeError("boom")
+
+        api = self.serve(follows=FollowStore(), push=FakePush(), stats=Broken())
+        self.assertEqual(self.request("POST", self.body(), api=api), (200, {"ok": True}))
+        self.assertIn("stats: RuntimeError\n", self.log.getvalue())
+
+    def test_receiver_survives_garbage(self):
+        rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        rx.bind(("127.0.0.1", 0))
+        self.addCleanup(rx.close)
+        tally = Tally()
+        threading.Thread(target=srv.run_receiver, args=(rx, tally, self.log), daemon=True).start()
+        tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(tx.close)
+        tx.sendto(b"\xff\xfe", rx.getsockname())
+        tx.sendto(f"<190>Nov 23 06:00:00 platform: {time.time()}|GET|/departures/KGX|200|HIT|1.2.3.4|"
+                  "WhatPlatform/1.5|E".encode(), rx.getsockname())
+        self.assertTrue(wait_until(lambda: tally.visitors_today() == 1))
+        self.assertNotIn("1.2.3.4", self.log.getvalue())
+
+    def flusher(self, db, tally, clock, every=0.02):
+        stop = threading.Event()
+        backups = Path(self.tmp.name) / "backups"
+        t = threading.Thread(target=srv.run_flusher, args=(tally, db, backups, stop, self.log),
+                             kwargs={"clock": clock, "every": every}, daemon=True)
+        t.start()
+        return stop, t, backups
+
+    def test_flusher_backs_up_closed_day(self):
+        now = [D_TS]
+        tally = Tally()
+        tally.add(stats_hit(D_TS))
+        stop, t, backups = self.flusher(self.db, tally, lambda: now[0])
+        self.assertTrue(wait_until(lambda: self.db.days(None)))
+        now[0] = D_TS + 86_400
+        self.assertTrue(wait_until(lambda: (backups / "stats-2026-11-23.db").exists()))
+        stop.set()
+        t.join(5)
+
+    def test_flusher_retries_failed_apply(self):
+        class Flaky(StatsDB):
+            fails = 1
+
+            def apply(self, deltas):
+                if self.fails:
+                    self.fails -= 1
+                    raise sqlite3.OperationalError("locked")
+                super().apply(deltas)
+
+        db = Flaky(Path(self.tmp.name) / "flaky.db")
+        self.addCleanup(db.close)
+        tally = Tally()
+        tally.add(stats_hit(D_TS))
+        stop, t, _ = self.flusher(db, tally, lambda: D_TS + 60)
+        self.assertTrue(wait_until(lambda: db.days(None)))
+        time.sleep(0.1)
+        stop.set()
+        t.join(5)
+        self.assertEqual(db.days(None)[0]["requests"], 1)
+        self.assertIn("stats: OperationalError\n", self.log.getvalue())
+
+    def test_flusher_final_flush_on_stop(self):
+        tally = Tally()
+        stop, t, _ = self.flusher(self.db, tally, lambda: D_TS + 60, every=3600)
+        tally.add(stats_hit(D_TS))
+        stop.set()
+        t.join(5)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(self.db.days(None)[0]["requests"], 1)
+
+    def test_departures_unaffected_when_stats_broken(self):
+        class Broken(StatsDB):
+            def apply(self, deltas):
+                raise RuntimeError("disk")
+
+        db = Broken(Path(self.tmp.name) / "b.db")
+        self.addCleanup(db.close)
+        tally = Tally()
+        tally.add(stats_hit(D_TS))
+        stop, t, _ = self.flusher(db, tally, lambda: D_TS + 60)
+        time.sleep(0.1)
+        self.assertTrue(t.is_alive())
+        c = http.client.HTTPConnection("127.0.0.1", self.api.server_address[1], timeout=30)
+        c.request("GET", "/departures/KGX")
+        self.assertEqual(c.getresponse().status, 200)
+        c.close()
+        stop.set()
+        t.join(5)

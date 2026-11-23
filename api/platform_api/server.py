@@ -2,20 +2,24 @@
 GET /departures/{CRS}/{OFFSET} → the trains from OFFSET (1..119) minutes ahead, GET /health,
 POST/DELETE /follow → push alerts (APNs) for one followed train per device.
 
-Privacy: requests are not logged. Logged: Darwin failures (station code + reason; a board
+Privacy: requests are not logged. nginx sends each What Platform request over local UDP to the
+stats receiver here (run_receiver), which keeps only aggregates (stats.py, stats_db.py) for the
+password-protected /admin page; the IP and User-Agent are never stored. Logged: Darwin failures (station code + reason; a board
 read in slices after a 500 logs its station and the minutes dropped),
 `apns <status> <reason>` / `apns network <Class>`, `follow poller: <Class>`, `unhandled <Class>`,
-and one startup line `follow: on|off`. Never device tokens, trains or client addresses.
+`stats: <Class>` / `stats: off`, and one startup line `follow: on|off`. Never device tokens, trains or client addresses.
 Follows live in memory only.
 Load: at most `max_inflight` concurrent Darwin calls (more → 503); nginx caches 30 s
 per CRS in front of this.
 """
 from __future__ import annotations
 
+import hmac
 import http.client
 import json
 import os
 import re
+import signal
 import socket
 import sys
 import threading
@@ -27,10 +31,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Collection, TextIO
 
+from .admin import render_page, summary
 from .apns import Apns
 from .board import BASE_ROWS, HHMM, darwin_window, to_board, to_stops, train_position
 from .follow import MAX_DURATION, FollowStore, Poller, find_followed
 from .slices import NoSlice, board_in_slices
+from .stats import Tally, london_day, parse_line
+from .stats_db import StatsDB
 
 DARWIN_URL = ("https://api1.raildata.org.uk/1010-live-departure-board-dep1_2"
               "/LDBWS/api/20220120/GetDepartureBoard")
@@ -57,6 +64,10 @@ ENVS = ("production", "sandbox")
 MAX_FOLLOW_BODY = 4096
 MAX_DESTINATION = 100
 MAX_STARTED_MS = 10 ** 15  # far beyond any real epoch ms; keeps the float division safe
+ADMIN_PATH = re.compile(r"^/admin(?:\?range=([a-z0-9]{1,8}))?$")
+ADMIN_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'"
+STATS_PORT = 8511  # UDP, fixed like 8510: nginx and compose send to this one
+FLUSH_EVERY = 60.0
 
 
 class Busy(Exception):
@@ -212,7 +223,8 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 attribution: str, service_url: str | None = None, service_key: str | None = None, deadline_s: float = 8.0, max_inflight: int = 8,
                 log: TextIO = sys.stderr, follows: FollowStore | None = None, push=None,
                 follow_wait_s: float = 5.0, poll_wait_s: float = 10.0, slice_budget_s: float = 10.0,
-                clock=time.time) -> ThreadingHTTPServer:
+                clock=time.time, stats: Tally | None = None, stats_db: StatsDB | None = None,
+                admin_key: str = "", station_names: dict[str, str] | None = None) -> ThreadingHTTPServer:
     slots = threading.BoundedSemaphore(max_inflight)
     # Stop lookups have their own, smaller pool: they must never leave the boards without a slot.
     service_slots = threading.BoundedSemaphore(max(1, max_inflight // 2))
@@ -328,9 +340,30 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 service_slots.release()
             self.send_json(200, body, cache="max-age=30")
 
+        def admin(self, rng: str):
+            """The stats page, only with nginx's secret header (nginx asks for the password)."""
+            given = self.headers.get("X-Admin-Key", "")
+            if not (admin_key and stats is not None and stats_db is not None
+                    and hmac.compare_digest(given.encode(), admin_key.encode())):
+                return self.send_json(404, {"error": "not found"})
+            today = london_day(clock())
+            page = render_page(summary(stats_db, today, rng, stats_db.visitors_base(today) + stats.visitors_today(),
+                                       len(follows) if follows is not None else 0, station_names or {}))
+            data = page.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Security-Policy", ADMIN_CSP)
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_GET(self):
             if self.path == "/health":
                 return self.send_json(200, {"ok": True})
+            am = ADMIN_PATH.match(self.path)
+            if am:
+                return self.admin(am.group(1) or "")
             sm = SERVICE_PATH.match(self.path)
             if sm:
                 return self.service(sm.group(1))
@@ -436,6 +469,11 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
                 return self.send_json(409, {"error": "conflict"})
             if result != "ok":
                 return self.send_json(503, {"error": "busy"})
+            if stats is not None:
+                try:
+                    stats.add_follow(now)
+                except Exception as e:  # stats never break following
+                    log.write(f"stats: {type(e).__name__}\n")
             self.send_json(200, {"ok": True})
 
         def do_DELETE(self):
@@ -462,6 +500,53 @@ def make_server(host: str, port: int, *, darwin_url: str, api_key: str, stations
     return httpd
 
 
+def run_receiver(sock: socket.socket, tally: Tally, log: TextIO) -> None:
+    """nginx's syslog lines → tally, forever. A bad packet is skipped; nothing of it is logged."""
+    while True:
+        try:
+            packet = sock.recv(65535)
+        except OSError:
+            return  # socket closed
+        try:
+            hit = parse_line(packet)
+            if hit is not None:
+                tally.add(hit)
+        except Exception as e:
+            log.write(f"stats: {type(e).__name__}\n")
+
+
+def run_flusher(tally: Tally, db: StatsDB, backup_dir: Path, stop: threading.Event, log: TextIO,
+                clock=time.time, every: float = FLUSH_EVERY) -> None:
+    """Every `every` s the tally's counters go to SQLite; a batch that fails stays pending and is
+    retried first. A closed day is backed up once its counters are stored (a failed backup is
+    retried alone). One last round when `stop` is set."""
+    pending: list = []
+    backups: list[str] = []
+    while True:
+        stopping = stop.wait(every)
+        try:
+            if not pending:
+                pending = tally.drain(clock())
+            db.apply(pending)
+            backups += [d.day for d in pending if d.closed]
+            pending = []
+        except Exception as e:
+            log.write(f"stats: {type(e).__name__}\n")
+        while backups:
+            try:
+                db.backup(backup_dir, backups[0])
+                backups.pop(0)
+            except Exception as e:
+                log.write(f"stats: {type(e).__name__}\n")
+                break
+        if stopping:
+            return
+
+
+def station_names(path: Path) -> dict[str, str]:
+    return {s["crs"]: s["name"] for s in json.loads(path.read_text())["stations"]}
+
+
 def main(env: dict | None = None) -> int:
     env = os.environ if env is None else env
     key = env.get("DARWIN_API_KEY", "").strip()
@@ -473,12 +558,41 @@ def main(env: dict | None = None) -> int:
     follows = FollowStore() if push is not None else None
     print("follow: on" if push is not None else "follow: off (APNS_* missing or invalid)",
           file=sys.stderr)
+    tally, stats_db = Tally(), None
+    try:
+        stats_db = StatsDB(env.get("STATS_DB", "/data/stats.db"))
+    except Exception as e:
+        print(f"stats: off ({type(e).__name__})", file=sys.stderr)
     # Port fixed inside the container; PORT in .env only changes the host side (compose).
     httpd = make_server("0.0.0.0", 8510, darwin_url=env.get("DARWIN_URL", DARWIN_URL),
                         api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS),
                         service_url=env.get("SERVICE_URL", SERVICE_URL),
                         service_key=env.get("DARWIN_SERVICE_KEY", "").strip() or None,
-                        attribution=ATTRIBUTION, follows=follows, push=push)
+                        attribution=ATTRIBUTION, follows=follows, push=push,
+                        stats=tally if stats_db is not None else None, stats_db=stats_db,
+                        admin_key=env.get("ADMIN_KEY", "").strip(), station_names=station_names(BUNDLED_STATIONS))
+    flusher = None
+    stop_stats = threading.Event()
+    if stats_db is not None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(("0.0.0.0", STATS_PORT))
+            threading.Thread(target=run_receiver, args=(sock, tally, sys.stderr), daemon=True).start()
+        except OSError as e:
+            print(f"stats: no receiver ({type(e).__name__})", file=sys.stderr)
+        flusher = threading.Thread(target=run_flusher, args=(
+            tally, stats_db, Path(env.get("STATS_BACKUP_DIR", "/data/backups")), stop_stats, sys.stderr),
+            daemon=True)
+        flusher.start()
+
+    def on_term(signum, frame):
+        # Store the last minute of stats, then stop serving (shutdown must run off this thread).
+        stop_stats.set()
+        if flusher is not None:
+            flusher.join(5)
+        threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, on_term)
     if push is not None:
         stop = threading.Event()
         poller = Poller(follows, httpd.fetch_board, push, fetch_position=httpd.fetch_position)
