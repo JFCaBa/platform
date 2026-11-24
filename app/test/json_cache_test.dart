@@ -150,7 +150,7 @@ void main() {
 
   test('requests the stations url', () async {
     await stationsCache(serve((_) => ok(feedBody)), dir).refresh();
-    expect(requests.single.url.toString(), 'https://jfcaba.github.io/platform/stations.json');
+    expect(requests.single.url.toString(), 'https://api.whatplatform.uk/stations.json');
     expect(requests.single.headers['User-Agent'], 'WhatPlatform/1.5');
   });
 

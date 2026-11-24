@@ -75,7 +75,7 @@ class FakeServer {
   void release(String crs) => holds.remove(crs)?.complete();
 
   late final http.Client client = MockClient((req) async {
-    if (req.url.host == 'jfcaba.github.io') {
+    if (req.url.path == '/stations.json') {
       if (stationsFail) throw const SocketException('offline');
       return okJson(fixture('stations.json'));
     }
