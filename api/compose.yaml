@@ -8,6 +8,7 @@ services:
       - "127.0.0.1:8511:8511/udp"  # nginx's stats lines (syslog), fixed like the receiver
     volumes:
       - /opt/platform/stats:/data  # stats.db + backups/, aggregates only
+      - /opt/platform/stations:/stations:ro  # stations.json from deploy/stations/refresh.sh
     restart: unless-stopped
     read_only: true
     tmpfs:

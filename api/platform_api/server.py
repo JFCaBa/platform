@@ -131,14 +131,34 @@ def fetch_darwin(url: str, api_key: str, deadline_s: float) -> dict:
         conn.close()
 
 
-def load_stations(url: str, fallback: Path) -> set[str]:
-    """Known CRS codes from stations.json (URL first, bundled copy if that fails)."""
+MIN_STATIONS = 2400
+
+
+def _local_stations(path: Path | None) -> list[dict] | None:
+    """The VPS's stations.json (deploy/stations/refresh.sh), or None when missing or implausible."""
+    if path is None:
+        return None
+    try:
+        st = json.loads(path.read_text())["stations"]
+        if len(st) >= MIN_STATIONS and all(s["crs"] and s["name"] for s in st):
+            return st
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def load_stations(url: str, fallback: Path, local: Path | None = None) -> set[str]:
+    """Known CRS codes from stations.json: the local file on the VPS first, then the URL, then
+    the bundled copy."""
+    st = _local_stations(local)
+    if st is not None:
+        return {s["crs"] for s in st}
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read(8 << 20))
         known = {s["crs"] for s in data["stations"]}
-        if len(known) >= 2400:
+        if len(known) >= MIN_STATIONS:
             return known
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -546,8 +566,10 @@ def run_flusher(tally: Tally, db: StatsDB, backup_dir: Path, stop: threading.Eve
             return
 
 
-def station_names(path: Path) -> dict[str, str]:
-    return {s["crs"]: s["name"] for s in json.loads(path.read_text())["stations"]}
+def station_names(local: Path | None, fallback: Path) -> dict[str, str]:
+    """CRS → name for /admin: the local file when usable, else the bundled copy."""
+    st = _local_stations(local) or json.loads(fallback.read_text())["stations"]
+    return {s["crs"]: s["name"] for s in st}
 
 
 def main(env: dict | None = None) -> int:
@@ -557,6 +579,8 @@ def main(env: dict | None = None) -> int:
         print("DARWIN_API_KEY missing", file=sys.stderr)
         return 1
     stations_url = env.get("STATIONS_URL", STATIONS_URL)
+    stations_file = Path(env.get("STATIONS_FILE", "/stations/stations.json"))
+    names = station_names(stations_file, BUNDLED_STATIONS)
     push = Apns.from_env(env)  # None without APNs secrets: /follow answers 503
     follows = FollowStore() if push is not None else None
     print("follow: on" if push is not None else "follow: off (APNS_* missing or invalid)",
@@ -568,12 +592,12 @@ def main(env: dict | None = None) -> int:
         print(f"stats: off ({type(e).__name__})", file=sys.stderr)
     # Port fixed inside the container; PORT in .env only changes the host side (compose).
     httpd = make_server("0.0.0.0", 8510, darwin_url=env.get("DARWIN_URL", DARWIN_URL),
-                        api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS),
+                        api_key=key, stations=load_stations(stations_url, BUNDLED_STATIONS, local=stations_file),
                         service_url=env.get("SERVICE_URL", SERVICE_URL),
                         service_key=env.get("DARWIN_SERVICE_KEY", "").strip() or None,
                         attribution=ATTRIBUTION, follows=follows, push=push,
                         stats=tally if stats_db is not None else None, stats_db=stats_db,
-                        admin_key=env.get("ADMIN_KEY", "").strip(), station_names=station_names(BUNDLED_STATIONS))
+                        admin_key=env.get("ADMIN_KEY", "").strip(), station_names=names)
     flusher = None
     stop_stats = threading.Event()
     if stats_db is not None:
@@ -604,7 +628,10 @@ def main(env: dict | None = None) -> int:
     def refresh():
         while True:
             time.sleep(24 * 3600)
-            httpd.stations = load_stations(stations_url, BUNDLED_STATIONS)
+            httpd.stations = load_stations(stations_url, BUNDLED_STATIONS, local=stations_file)
+            fresh = station_names(stations_file, BUNDLED_STATIONS)
+            names.clear()
+            names.update(fresh)
 
     threading.Thread(target=refresh, daemon=True).start()
     print(f"listening on :{httpd.server_address[1]} ({len(httpd.stations)} stations)", file=sys.stderr)

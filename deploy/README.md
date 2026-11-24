@@ -50,6 +50,21 @@ If nothing arrives (Docker's UDP publishing on 127.0.0.1): publish `172.17.0.1:8
 nginx's `syslog:server=` at `172.17.0.1:8511`, or as a last resort `network_mode: host` for the API
 container. The receiver must stay in the API process (it shares the in-memory tally with `/admin`).
 
+## Stations (`/stations.json`)
+
+`https://api.whatplatform.uk/stations.json` is rebuilt monthly on this server from NaPTAN (the same
+`pipeline/build_stations.py` as the GitHub Pages workflow, which keeps running for installed apps
+until they all read from here). The API reads the same file (`/stations` in the container), with
+its bundled copy as fallback. Once:
+
+```sh
+sudo install -d -o ubuntu -g ubuntu -m 755 /opt/platform/stations
+bash /opt/platform/repo/deploy/stations/refresh.sh                      # first build, as ubuntu
+( crontab -l; echo '17 4 3 * * /usr/bin/bash /opt/platform/repo/deploy/stations/refresh.sh >> /opt/platform/stations/refresh.log 2>&1' ) | crontab -
+```
+
+A failed build keeps the previous file; see `/opt/platform/stations/refresh.log`.
+
 ## Update
 
 ```sh

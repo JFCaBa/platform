@@ -727,7 +727,43 @@ class FollowTest(unittest.TestCase):
         self.assertEqual(self.log.getvalue(), "")
 
 
+def write_stations(path, n, extra=None):
+    st = [{"crs": f"{chr(65 + i // 676)}{chr(65 + i // 26 % 26)}{chr(65 + i % 26)}", "name": f"S{i}",
+           "lat": 51.0, "lon": -1.0} for i in range(n)]
+    if extra:
+        st.append(extra)
+    path.write_text(json.dumps({"version": 1, "stations": st}))
+
+
 class StationsTest(unittest.TestCase):
+    NOWHERE = "http://127.0.0.1:9/nothing.json"
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.local = Path(self.tmp.name) / "stations.json"
+
+    def test_local_file_wins(self):
+        write_stations(self.local, 2500, {"crs": "ZZ9", "name": "Local only", "lat": 51.0, "lon": -1.0})
+        known = srv.load_stations(self.NOWHERE, srv.BUNDLED_STATIONS, local=self.local)
+        self.assertIn("ZZ9", known)
+        self.assertEqual(srv.station_names(self.local, srv.BUNDLED_STATIONS)["ZZ9"], "Local only")
+
+    def test_short_local_file_ignored(self):
+        write_stations(self.local, 10, {"crs": "ZZ9", "name": "Local only", "lat": 51.0, "lon": -1.0})
+        known = srv.load_stations(self.NOWHERE, srv.BUNDLED_STATIONS, local=self.local)
+        self.assertNotIn("ZZ9", known)
+        self.assertIn("KGX", known)
+        self.assertNotIn("ZZ9", srv.station_names(self.local, srv.BUNDLED_STATIONS))
+
+    def test_broken_or_missing_local_file_ignored(self):
+        self.local.write_text("{not json")
+        self.assertIn("KGX", srv.load_stations(self.NOWHERE, srv.BUNDLED_STATIONS, local=self.local))
+        missing = Path(self.tmp.name) / "none.json"
+        self.assertIn("KGX", srv.load_stations(self.NOWHERE, srv.BUNDLED_STATIONS, local=missing))
+        self.assertEqual(srv.station_names(missing, srv.BUNDLED_STATIONS)["KGX"], "London Kings Cross")
+
     def test_load_stations_falls_back_to_bundled(self):
         known = srv.load_stations("http://127.0.0.1:9/nothing.json", srv.BUNDLED_STATIONS)
         self.assertIn("KGX", known)
@@ -748,7 +784,7 @@ class StationsTest(unittest.TestCase):
             return Dummy()
 
         orig_make, orig_load = srv.make_server, srv.load_stations
-        srv.make_server, srv.load_stations = fake_make, lambda url, fb: {"KGX"}
+        srv.make_server, srv.load_stations = fake_make, lambda url, fb, local=None: {"KGX"}
         try:
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 self.assertEqual(srv.main(env={"DARWIN_API_KEY": "k", "PORT": "9999"}), 0)
@@ -794,7 +830,7 @@ class StationsTest(unittest.TestCase):
             return Dummy()
 
         orig = srv.make_server, srv.load_stations, srv.Poller
-        srv.make_server, srv.load_stations, srv.Poller = fake_make, (lambda url, fb: {"KGX"}), FakePoller
+        srv.make_server, srv.load_stations, srv.Poller = fake_make, (lambda url, fb, local=None: {"KGX"}), FakePoller
         try:
             env = {"DARWIN_API_KEY": "k", "APNS_KEY": base64.b64encode(pem).decode(),
                    "APNS_KEY_ID": "KID", "APNS_TEAM_ID": "TEAM"}
