@@ -79,6 +79,8 @@ svg text { fill: var(--muted); font-size: 10px; }
 .row .n { font-variant-numeric: tabular-nums; color: var(--muted); }
 .empty { color: var(--muted); }
 footer { margin-top: 28px; color: var(--muted); font-size: 12px; }
+h1 a { float: right; font-size: 14px; font-weight: 500; color: var(--brand); text-decoration: none;
+  padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; }
 """
 
 
@@ -123,7 +125,7 @@ def render_page(s: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>What Platform · stats</title><style>{CSS}</style></head>
 <body><main>
-<h1>What Platform · stats</h1>
+<h1>What Platform · stats <a href="/anden/admin">Andén →</a></h1>
 <div class="cards">{cards}</div>
 <h2>People per day <small>· last 30 days</small></h2><div class="panel">{daily}</div>
 <nav class="range">{nav}</nav>

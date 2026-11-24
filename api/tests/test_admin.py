@@ -82,6 +82,9 @@ class AdminTest(unittest.TestCase):
         self.assertLess(page.index("People per day"), nav)
         self.assertLess(nav, page.index("Top stations"))
 
+    def test_links_to_anden_admin(self):
+        self.assertIn('href="/anden/admin"', render_page(self.s()))
+
     def test_render_escapes(self):
         self.db.apply([delta(TODAY, stations={"BAD": 99})])
         page = render_page(self.s("today"))
