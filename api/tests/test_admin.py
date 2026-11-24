@@ -75,6 +75,13 @@ class AdminTest(unittest.TestCase):
         self.assertIn("No data yet", render_page(s))
         db.close()
 
+    def test_range_nav_above_filtered_sections_only(self):
+        page = render_page(self.s())
+        nav = page.index('href="?range=today"')
+        self.assertLess(page.index("People today"), nav)
+        self.assertLess(page.index("People per day"), nav)
+        self.assertLess(nav, page.index("Top stations"))
+
     def test_render_escapes(self):
         self.db.apply([delta(TODAY, stations={"BAD": 99})])
         page = render_page(self.s("today"))

@@ -53,10 +53,11 @@ CSS = """
 body { margin: 0; background: var(--bg); color: var(--ink);
   font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 main { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
-h1 { font-size: 20px; margin: 0 0 12px; color: var(--brand); }
+h1 { font-size: 20px; margin: 0 0 16px; color: var(--brand); }
 h2 { font-size: 15px; margin: 28px 0 10px; color: var(--muted); font-weight: 600;
   text-transform: uppercase; letter-spacing: .04em; }
-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 28px 0 -12px; }
+h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
 nav a { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink);
   text-decoration: none; font-size: 14px; }
 nav a.on { background: var(--brand); border-color: var(--brand); color: var(--bg); }
@@ -123,9 +124,9 @@ def render_page(s: dict) -> str:
 <title>What Platform · stats</title><style>{CSS}</style></head>
 <body><main>
 <h1>What Platform · stats</h1>
-<nav>{nav}</nav>
 <div class="cards">{cards}</div>
-<h2>People per day</h2><div class="panel">{daily}</div>
+<h2>People per day <small>· last 30 days</small></h2><div class="panel">{daily}</div>
+<nav class="range">{nav}</nav>
 <h2>Top stations</h2><div class="panel">{top}</div>
 <h2>Busiest hours</h2><div class="panel">{hours}</div>
 <h2>App versions</h2><div class="panel">{versions}</div>
