@@ -362,6 +362,32 @@ void main() {
       expect(server.requested.last, 'KGX/30'); // 11:55 is 41 min ahead now: 30, no gap
     });
 
+    test('pages older than 10 min are dropped: a night in the background brings back no old trains', () async {
+      server.boards['KGX'] = busyBase();
+      server.boards['KGX/30'] = boardJson('KGX', clockNow, timeOffset: 30, complete: false, services: [
+        service('11:30', serviceId: 'c'),
+      ]);
+      final c = await startedAt(nearKingsCross);
+      await c.loadMore();
+      expect(c.services.map((d) => d.serviceId), ['a', 'b', 'c']);
+      clockNow = clockNow.add(const Duration(hours: 20)); // 06:14 the next day
+      server.boards['KGX'] = boardJson('KGX', clockNow, timeOffset: 0, complete: false, services: [
+        service('06:20', serviceId: 'm1'),
+        service('07:30', serviceId: 'm2'),
+      ]);
+      timers.fireActive();
+      await settle();
+      expect(c.services.map((d) => d.serviceId), ['m1', 'm2']); // not yesterday's 11:30
+      expect(c.debugPageCount, 0); // and the old page is gone from the state
+      server.boards['KGX/75'] = boardJson('KGX', clockNow, timeOffset: 75, complete: false, services: [
+        service('07:30', serviceId: 'm2'),
+        service('08:10', serviceId: 'm3'),
+      ]);
+      await c.loadMore();
+      expect(server.requested.last, 'KGX/75'); // from this morning's last train (07:30, 76 min)
+      expect(c.services.map((d) => d.serviceId), ['m1', 'm2', 'm3']);
+    });
+
     test('a page that adds nothing (same cached answer) pauses loading for 15 min', () async {
       server.boards['KGX'] = busyBase(complete: true);
       final page = boardJson('KGX', clockNow, timeOffset: 119, complete: false, services: [service('12:20', serviceId: 'z')]);

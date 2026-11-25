@@ -156,11 +156,20 @@ class AppController extends ChangeNotifier {
     return b == null ? const [] : mergeServices(b, _livePages, now());
   }
 
-  /// The loaded pages that still follow on from the current base board without a gap.
+  /// The loaded pages that still follow on from the current base board without a gap. Pages made
+  /// more than [expireAfter] ago are left out: they list trains a few hours ahead, so one kept
+  /// overnight (app in the background) would bring back trains that have gone.
   List<Board> get _livePages {
     final b = board;
-    return b == null || _pages.isEmpty ? const [] : contiguousPages(b, _pages, now());
+    if (b == null || _pages.isEmpty) return const [];
+    final fresh = [for (final p in _pages) if (!_pageExpired(p)) p];
+    return fresh.isEmpty ? const [] : contiguousPages(b, fresh, now());
   }
+
+  bool _pageExpired(Board p) => now().difference(p.generatedAt) > expireAfter;
+
+  @visibleForTesting
+  int get debugPageCount => _pages.length;
 
   /// Offset of the next page, or null when Darwin cannot reach further.
   int? get _nextOffset {
@@ -468,6 +477,7 @@ class AppController extends ChangeNotifier {
     if (b != null) {
       board = b;
       _lastFailed = false;
+      _pages.removeWhere(_pageExpired); // see _livePages
       if (!rateLimited) _rateLimitedUntil = null; // a 429 meanwhile (e.g. a later page) still holds
     } else {
       _lastFailed = true;

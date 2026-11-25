@@ -58,6 +58,9 @@ void main() {
     expect(minutesUntil(dep('02:10'), DateTime.utc(2026, 3, 29, 0, 50)), 20);
     // clocks go back 25-10-2026 at 01:00 UTC: 00:50 UTC (01:50 BST) to 01:10 GMT is 20 minutes
     expect(minutesUntil(dep('01:10'), DateTime.utc(2026, 10, 25, 0, 50)), 20);
+    // an hour that happens twice (25-10-2026): the instant nearest now, BST or GMT
+    expect(minutesUntil(dep('01:40'), DateTime.utc(2026, 10, 25, 0, 30)), 10); // 01:30 BST
+    expect(minutesUntil(dep('01:40'), DateTime.utc(2026, 10, 25, 1, 30)), 10); // 01:30 GMT
   });
 
   test('waitText', () {

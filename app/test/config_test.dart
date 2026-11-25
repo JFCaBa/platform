@@ -14,4 +14,8 @@ void main() {
     expect(stationsUrl, '$apiBaseUrl/stations.json');
     expect(apiBaseUrl, 'https://api.whatplatform.uk');
   });
+
+  test('privacy policy is /privacy: the root is the website since 25-11-2026', () {
+    expect(privacyUrl, 'https://whatplatform.uk/privacy');
+  });
 }

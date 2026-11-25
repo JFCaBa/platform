@@ -34,7 +34,7 @@ final _london = tz.getLocation('Europe/London');
 /// The train's expected (else scheduled) London time as an instant; null when Darwin only says
 /// "Delayed". Times on a board are within a few hours: of the departure on yesterday's, today's or
 /// tomorrow's London date, the instant nearest to [nowUtc] wins (right across midnight and clock
-/// changes).
+/// changes, including the hour that happens twice in October).
 DateTime? departureAt(Departure d, DateTime nowUtc) {
   final etd = d.etd;
   if (etd == 'Delayed') return null;
@@ -45,7 +45,15 @@ DateTime? departureAt(Departure d, DateTime nowUtc) {
   DateTime? best;
   for (final day in [-1, 0, 1]) {
     final at = tz.TZDateTime(_london, today.year, today.month, today.day + day, h, m);
-    if (best == null || at.difference(nowUtc).abs() < best.difference(nowUtc).abs()) best = at;
+    // On the October change night h:m happens twice (BST, then GMT an hour later): try both,
+    // whichever of the two the constructor picked.
+    final around = [
+      for (final d in const [Duration(hours: -1), Duration(hours: 1)]) tz.TZDateTime.from(at.add(d), _london),
+    ];
+    final candidates = [at, for (final c in around) if (c.hour == h && c.minute == m) c];
+    for (final c in candidates) {
+      if (best == null || c.difference(nowUtc).abs() < best.difference(nowUtc).abs()) best = c;
+    }
   }
   return best!.toUtc();
 }
