@@ -3,7 +3,8 @@
 nginx sends one UDP line per What Platform request (deploy/nginx/whatplatform.uk.conf). Each
 line's IP and User-Agent are combined, for an instant, with a random key that lives only in
 memory and is replaced when a London day ends: `HMAC(key, ip + ua)` goes into that day's set so
-a person is counted once a day. When the day ends the key and the set are dropped and only the
+a person is counted once a day. People are the app (User-Agent `WhatPlatform/…`) and web browsers
+(`Mozilla/…`, version «web») other than bots, crawlers, link previews and headless tools. When the day ends the key and the set are dropped and only the
 day's count remains. The IP, the User-Agent and the hashes never reach disk or a log.
 """
 from __future__ import annotations
@@ -27,6 +28,8 @@ VERSION_RE = re.compile(r"^WhatPlatform/([0-9A-Za-z.+-]{1,16})(?:\s|$)")
 DEPARTURES_RE = re.compile(r"^/departures/([A-Z]{3})(?:/[0-9]{1,3})?$")
 SERVICE_RE = re.compile(r"^/service/[A-Za-z0-9_-]{6,40}$")
 OTHER = "otro"
+WEB = "web"
+NOT_A_PERSON_RE = re.compile(r"bot|crawl|spider|preview|headless", re.IGNORECASE)
 
 
 class Hit(NamedTuple):
@@ -89,9 +92,15 @@ def parse_line(packet: bytes) -> Hit | None:
     return None
 
 
+def _is_browser(ua: str) -> bool:
+    return ua.startswith("Mozilla/") and not NOT_A_PERSON_RE.search(ua)
+
+
 def _version(ua: str) -> str:
     m = VERSION_RE.match(ua)
-    return m.group(1) if m else OTHER
+    if m:
+        return m.group(1)
+    return WEB if _is_browser(ua) else OTHER
 
 
 class _Day:
@@ -145,7 +154,7 @@ class Tally:
             if hit.crs:
                 c.stations[hit.crs] += 1
             c.versions[_version(hit.ua)] += 1
-            if hit.ua.startswith(APP_UA):
+            if hit.ua.startswith(APP_UA) or _is_browser(hit.ua):
                 self._seen.add(hmac.new(self._key, f"{hit.ip}\n{hit.ua}".encode(), "sha256").digest()[:16])
 
     def add_follow(self, ts: float) -> None:

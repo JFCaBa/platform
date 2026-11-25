@@ -91,6 +91,18 @@ class TallyTest(unittest.TestCase):
         self.assertEqual(d.versions, {"1.5": 3, "1.4": 1, "otro": 1})
         self.assertFalse(d.closed)
 
+    def test_browsers_count_as_web_people_bots_do_not(self):
+        t = Tally()
+        ts = utc(*D, 10)
+        t.add(hit(ts, ip="1.1.1.1", ua="Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1"))
+        t.add(hit(ts, ip="1.1.1.1", ua="Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1"))
+        t.add(hit(ts, ip="2.2.2.2", ua="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"))
+        t.add(hit(ts, ip="3.3.3.3", ua="Mozilla/5.0 HeadlessChrome/120"))
+        t.add(hit(ts, ip="4.4.4.4", ua="curl/8"))
+        [d] = t.drain(ts + 1)
+        self.assertEqual(d.visitors, 1)
+        self.assertEqual(d.versions, {"web": 2, "otro": 3})
+
     def test_hours_and_stations(self):
         t = Tally()
         t.add(hit(utc(*D, 8, 10)))
