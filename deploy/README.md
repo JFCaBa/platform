@@ -65,6 +65,28 @@ bash /opt/platform/repo/deploy/stations/refresh.sh                      # first 
 
 A failed build keeps the previous file; see `/opt/platform/stations/refresh.log`.
 
+## Website (`whatplatform.uk`)
+
+Static files in `site/`, served by nginx from the repo checkout (`/opt/platform/repo/site`):
+`index.html` (shell for `/` and `/station/{CRS}`), `privacy.html` (`/privacy`), `style.css`,
+`js/*.js` (ES modules, no build), the App Store badge and icons. Everything else in `site/`
+(`test/`, `package.json`) answers 404. The browser calls `https://api.whatplatform.uk` directly;
+the API locations it uses send `Access-Control-Allow-Origin: https://whatplatform.uk`.
+
+- Tests: `node --test site/test/*.test.js` (Node's own runner, no dependencies).
+- Local: `python3 deploy/web/dev.py` → http://localhost:8000/ (serves `site/` like nginx and
+  proxies the API with a User-Agent the stats do not count as a person).
+- Deploy: `git pull` (files) and, when the nginx conf changed, copy it and reload (Update below).
+- Check:
+
+  ```bash
+  curl -sI -A Mozilla/5.0 https://whatplatform.uk/ | grep -i -E '^HTTP|content-security'   # 200 + CSP
+  curl -sI -A Mozilla/5.0 https://whatplatform.uk/station/KGX | head -1                      # 200
+  curl -sI -A Mozilla/5.0 https://whatplatform.uk/privacy | head -1                          # 200
+  curl -sI -A Mozilla/5.0 https://whatplatform.uk/test/api.test.js | head -1                 # 404
+  curl -sI -A Mozilla/5.0 https://api.whatplatform.uk/departures/KGX | grep -i access-control  # whatplatform.uk
+  ```
+
 ## Update
 
 ```sh

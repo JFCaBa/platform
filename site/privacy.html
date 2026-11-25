@@ -4,20 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>What Platform — Privacy</title>
-<style>
-  :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #555; }
-  @media (prefers-color-scheme: dark) { :root { --fg: #f2f2f2; --bg: #111; --muted: #aaa; } }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.55 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 1.7rem; margin: 0 0 4px; }
-  h2 { font-size: 1.15rem; margin-top: 2em; }
-  .muted { color: var(--muted); }
-</style>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/favicon.png" type="image/png">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<main>
+<main class="privacy">
+  <p><a href="/">← What Platform</a></p>
   <h1>What Platform</h1>
-  <p class="muted">The next trains and their platform at your nearest station in Great Britain.</p>
+  <p class="tag">The next trains and their platform at your nearest station in Great Britain.</p>
 
   <h2>Privacy policy</h2>
   <p><strong>We don't collect personal data such as your name, account, location or contacts.</strong> The app has no accounts, no ads and no tracking; our server only counts anonymous usage (see below). The one exception: if you follow a train on an iPhone, its push token (a pseudonymous device identifier) is kept on our server for a few hours (see below).</p>
@@ -38,13 +33,17 @@
   <h2>What stays on your phone</h2>
   <p>The last station you looked at, your destination filters and the train you follow are stored on your phone so the app opens where you left it. They never leave the device, except the train you follow on iPhone, as described above. Deleting the app deletes them.</p>
 
+  <h2>The website</h2>
+  <p>On <a href="/">whatplatform.uk</a>, your browser asks our server for the list of stations, the departures of one station (by its three-letter code) and, when you tap a train, that train's stops (by National Rail's code for it). That is all these requests contain. They are counted anonymously in the same way as the app's: your IP address and browser are combined for an instant with a random key that is deleted every day, and only the daily totals are kept.</p>
+  <p>«Use my location» asks your browser for your location only when you press it, and uses it <strong>only in your browser</strong> to find the nearest station; it is never sent to us. The last five stations you looked at are kept in your browser's local storage so they appear on the home page; they never leave your browser. The website uses no cookies and no analytics or third-party scripts.</p>
+
   <h2>Data sources</h2>
   <p>Train times: National Rail (Darwin, via the Rail Data Marketplace). Station locations: NaPTAN, Department for Transport, Open Government Licence.</p>
 
   <h2>Contact</h2>
   <p>Questions: open an issue at <a href="https://github.com/JFCaBa/platform/issues">github.com/JFCaBa/platform</a>.</p>
 
-  <p class="muted">Last updated 23 November 2026.</p>
+  <p class="updated">Last updated 25 November 2026.</p>
 </main>
 </body>
 </html>
