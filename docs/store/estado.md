@@ -140,3 +140,10 @@ privacidad de las tiendas, conclusión de Claude: **sin cambios**.
 - Matiz: los hashes del día viven en memoria hasta medianoche. Si Apple o Google preguntan,
   la respuesta es que es un recuento agregado sin identificador persistente.
 
+
+## Web (25-11-2026)
+
+- https://whatplatform.uk es ahora la web (panel como la app, botón de App Store); la política de privacidad pasa a https://whatplatform.uk/privacy.
+- Play: URL de privacidad cambiada a `/privacy` en App content (el usuario guarda y envía desde Publishing overview).
+- App Store: la URL de privacidad solo se puede cambiar con una versión nueva → cambiarla al preparar la 1.5.0, junto con `privacyUrl` en `app/lib/config.dart` (`https://whatplatform.uk/privacy`). Mientras tanto el enlace de las apps instaladas abre la portada, que enlaza a Privacy.
+- Pendiente en la app (mismo fallo que arreglamos en la web): las páginas de «Show more» no caducan; con la app abierta en segundo plano toda la noche podrían reaparecer trenes del día anterior. Filtrar páginas de más de 10 min, como `freshPages` en `site/js/pages.js`.
