@@ -29,6 +29,21 @@ function londonInstant(y, mo, d, h, mi) {
   return guess - londonOffset(first) * MIN;
 }
 
+/** Every instant London shows y-mo-d h:mi: one, two on the October change night (BST and GMT),
+ * or, in the March gap, the instant londonInstant picks. */
+function wallClockInstants(y, mo, d, h, mi) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi);
+  const out = [guess - 60 * MIN, guess].filter((ms) => { const t = london(ms); return t.h === h && t.mi === mi; });
+  return out.length ? out : [londonInstant(y, mo, d, h, mi)];
+}
+
+/** Of a time that happens twice (October), the first not gone more than 5 min ago: a board
+ * lists trains still to leave, so a 01:10 seen at 01:20 BST is the GMT one, 50 min away. */
+const DUE_GRACE_MS = 5 * MIN;
+function pickOccurrence(instants, nowMs) {
+  return instants.find((ms) => ms - nowMs >= -DUE_GRACE_MS) ?? instants[instants.length - 1];
+}
+
 /** "10:05:31" in London. */
 export function londonHhmm(ms) {
   const t = london(ms);
@@ -68,7 +83,7 @@ function departureAt(d, nowMs) {
   const today = london(nowMs);
   let best = null;
   for (const day of [-1, 0, 1]) {
-    const at = londonInstant(today.y, today.mo, today.d + day, h, m);
+    const at = pickOccurrence(wallClockInstants(today.y, today.mo, today.d + day, h, m), nowMs);
     if (best == null || Math.abs(at - nowMs) < Math.abs(best - nowMs)) best = at;
   }
   return best;

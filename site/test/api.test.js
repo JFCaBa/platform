@@ -42,3 +42,17 @@ test('fetchJson: the caller aborting still rethrows AbortError, not a timeout', 
   setTimeout(() => c.abort(), 10);
   await assert.rejects(fetchJson('/x', hang, c.signal, 5000), { name: 'AbortError' });
 });
+
+import { validBoard, validStations } from '../js/api.js';
+test('validBoard and validStations reject malformed answers', () => {
+  const ok = { crs: 'KGX', generatedAt: '2026-11-25T10:00:00Z', services: [{ std: '10:05', destination: 'Leeds' }] };
+  assert.equal(validBoard(ok), true);
+  assert.equal(validBoard({ ...ok, services: null }), false);
+  assert.equal(validBoard({ ...ok, generatedAt: 'soon' }), false);
+  assert.equal(validBoard({ ...ok, services: [{ std: 5, destination: 'x' }] }), false);
+  assert.equal(validBoard({ ...ok, nrccMessages: 'x' }), false);
+  assert.equal(validBoard(null), false);
+  assert.equal(validStations({ stations: [{ crs: 'KGX', name: 'K', lat: 1, lon: 2 }] }), true);
+  assert.equal(validStations({ stations: [{ crs: 'KGX' }] }), false);
+  assert.equal(validStations([]), false);
+});

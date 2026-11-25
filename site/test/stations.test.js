@@ -39,3 +39,13 @@ test('formatDistance', () => {
   assert.equal(formatDistance(1234), '1.2 km');
   assert.equal(formatDistance(123456), '123 km');
 });
+
+test('search aliases: x for cross, saint for st, intl', () => {
+  const T = [{ crs: 'KGX', name: 'London Kings Cross' }, { crs: 'SAC', name: 'St Albans City' },
+    { crs: 'STP', name: 'London St Pancras International' }, { crs: 'CHX', name: 'London Charing Cross' }];
+  const c = (q) => searchStations(T, q).map((s) => s.crs);
+  assert.equal(c('kings x')[0], 'KGX');
+  assert.equal(c('charing x')[0], 'CHX');
+  assert.equal(c('saint albans')[0], 'SAC');
+  assert.equal(c('st pancras intl')[0], 'STP');
+});

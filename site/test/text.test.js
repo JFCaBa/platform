@@ -70,3 +70,12 @@ test('londonHhmm', () => {
   assert.equal(londonHhmm(at('2026-07-01T09:05:31Z')), '10:05:31');
   assert.equal(londonHhmm(at('2026-12-01T23:58:00Z')), '23:58:00');
 });
+
+test('an ambiguous October time is the instant nearest now', () => {
+  // 25-10-2026: clocks go back at 01:00 UTC; 01:40 happens at 00:40Z (BST) and 01:40Z (GMT).
+  assert.equal(minutesUntilDeparture(dep('01:40'), at('2026-10-25T00:30:00Z')), 10); // 01:30 BST
+  assert.equal(minutesUntilDeparture(dep('01:40'), at('2026-10-25T01:30:00Z')), 10); // 01:30 GMT
+  // a 01:10 still on the board at 01:20 BST is the GMT one, 50 min away; a 01:10 two minutes ago is Due
+  assert.equal(minutesUntilDeparture(dep('01:10'), at('2026-10-25T00:20:00Z')), 50);
+  assert.equal(minutesUntilDeparture(dep('01:10'), at('2026-10-25T00:12:00Z')), -2);
+});

@@ -1,11 +1,11 @@
 // What Platform on the web: home (search, location, popular stations) and /station/{CRS} boards.
 // Same behaviour as the app's home screen (app/lib/ui/home_screen.dart), minus following.
-import { apiBase, fetchJson, ApiError } from './api.js';
+import { apiBase, fetchJson, ApiError, validBoard, validStations } from './api.js';
 import { parseRoute } from './route.js';
 import { stopsNeedFetch } from './stops.js';
 import { loadRecents, addRecent } from './recents.js';
 import { nearestStation, searchStations, formatDistance } from './stations.js';
-import { mergeServices, contiguousPages, freshPages, startIn, endIn, nextOffset, coveredEnd, OFFSET_STEP } from './pages.js';
+import { mergeServices, contiguousPages, freshPages, trainKey, startIn, endIn, nextOffset, coveredEnd, OFFSET_STEP } from './pages.js';
 import {
   isCancelled, statusText, isLate, nextTrainIndex, minutesUntilDeparture, waitText, londonMinutesUntil, londonHhmm,
 } from './text.js';
@@ -36,15 +36,17 @@ let abort = new AbortController();
 let refreshTimer = null;
 let clockTimer = null;
 let s = null; // station page state
+let searchActive = null; // CRS highlighted in the suggestions, kept across re-renders
 
 const freshStation = (crs) => ({
   crs, board: null, pages: [], failed: null, loading: true, loadingMore: false, stalledUntil: 0,
   rateLimitedUntil: 0, filters: new Set(), openSid: null, stops: new Map(), alertsOpen: false, unknown: false,
+  moreFailed: false,
 });
 
 function loadStations() {
   stationsPromise ??= fetchJson(`${API}/stations.json`)
-    .then((j) => (stations = j.stations ?? []))
+    .then((j) => { if (!validStations(j)) throw new ApiError('unavailable'); return (stations = j.stations); })
     .catch(() => { stationsPromise = null; return null; });
   return stationsPromise;
 }
@@ -64,8 +66,25 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
-/** Replaces the page content; null/false children are skipped, arrays flattened. */
-const put = (...kids) => root.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
+/** Replaces the page content; null/false children are skipped, arrays flattened. Focus survives:
+ * the element with the same data-key (a train, a chip, «Show more»…) or the search box, with its
+ * text and caret, gets it back — the clock re-renders the station page every 15 s. */
+function put(...kids) {
+  const el = document.activeElement;
+  const key = el?.dataset?.key;
+  const typing = el?.matches?.('.search input') ? { value: el.value, pos: el.selectionStart } : null;
+  root.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
+  if (typing) {
+    const input = root.querySelector('.search input');
+    if (!input) return;
+    input.value = typing.value;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(typing.pos, typing.pos);
+    if (typing.value) input.dispatchEvent(new Event('input'));
+  } else if (key) {
+    [...root.querySelectorAll('[data-key]')].find((x) => x.dataset.key === key)?.focus({ preventScroll: true });
+  }
+}
 
 const badge = (small = false) => h('a', { class: small ? 'badge small' : 'badge', href: APP_STORE, rel: 'noopener' },
   h('img', { src: '/app-store-badge.svg', alt: 'Download on the App Store', width: small ? 102 : 132, height: small ? 34 : 44 }));
@@ -115,7 +134,8 @@ function searchBox(placeholder) {
   const list = h('ul', { class: 'suggest', id: 'suggest', role: 'listbox', hidden: true });
   let results = [];
   let active = -1;
-  const pick = (st) => { input.blur(); go(`/station/${st.crs}`); };
+  const pick = (st) => { searchActive = null; input.blur(); go(`/station/${st.crs}`); };
+  const move = (i) => { active = i; searchActive = results[i]?.crs ?? null; draw(); };
   const draw = () => {
     list.replaceChildren(...results.map((st, i) => h('li', {
       role: 'option', 'aria-selected': i === active ? 'true' : 'false',
@@ -130,14 +150,15 @@ function searchBox(placeholder) {
     const all = stations ?? (await loadStations()) ?? [];
     if (q !== input.value) return; // typed on meanwhile
     results = searchStations(all, q);
-    active = results.length ? 0 : -1;
+    const kept = results.findIndex((x) => x.crs === searchActive); // same choice after a re-render
+    active = kept >= 0 ? kept : results.length ? 0 : -1;
     draw();
   });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown' && results.length) { active = (active + 1) % results.length; draw(); e.preventDefault(); }
-    else if (e.key === 'ArrowUp' && results.length) { active = (active - 1 + results.length) % results.length; draw(); e.preventDefault(); }
+    if (e.key === 'ArrowDown' && results.length) { move((active + 1) % results.length); e.preventDefault(); }
+    else if (e.key === 'ArrowUp' && results.length) { move((active - 1 + results.length) % results.length); e.preventDefault(); }
     else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); pick(results[active]); }
-    else if (e.key === 'Escape') { results = []; draw(); }
+    else if (e.key === 'Escape') { results = []; searchActive = null; draw(); }
   });
   input.addEventListener('blur', () => setTimeout(() => { results = []; draw(); }, 150));
   return h('div', { class: 'search' }, input, list);
@@ -244,6 +265,7 @@ async function doRefresh() {
   try {
     const b = await fetchJson(`${API}/departures/${crs}`, fetch, abort.signal);
     if (myGen !== gen) return;
+    if (!validBoard(b)) throw new ApiError('unavailable');
     s.board = b;
     s.failed = null;
   } catch (e) {
@@ -298,6 +320,8 @@ async function loadMore() {
   try {
     const p = await fetchJson(`${API}/departures/${crs}/${off}`, fetch, abort.signal);
     if (myGen !== gen) return;
+    if (!validBoard(p)) throw new ApiError('unavailable');
+    s.moreFailed = false;
     const t = Date.now();
     const live = livePages(t);
     if (coveredEnd(s.board, [...live, p], t) > coveredEnd(s.board, live, t)) {
@@ -309,6 +333,7 @@ async function loadMore() {
   } catch (e) {
     if (myGen !== gen || e?.name === 'AbortError') return;
     if (e instanceof ApiError && e.kind === 'ratelimited') s.rateLimitedUntil = Date.now() + RATE_LIMIT_MS;
+    else s.moreFailed = true;
   }
   s.loadingMore = false;
   renderStation();
@@ -352,7 +377,9 @@ function stopsPanel(d) {
   if (!got || got.state === 'loading') body = h('div', { class: 'sub' }, 'Loading stops…');
   else if (got.state === 'error') body = h('div', { class: 'sub' }, 'Stops unavailable');
   else {
-    const portions = got.portions.filter((p) => Array.isArray(p) && p.length);
+    const portions = got.portions.filter((p) => Array.isArray(p))
+      .map((p) => p.filter((st) => st && typeof st.st === 'string' && typeof st.name === 'string'))
+      .filter((p) => p.length);
     body = portions.length === 0 ? h('div', { class: 'sub' }, 'No more stops')
       : portions.map((p) => [
         portions.length > 1 ? h('div', { class: 'to' }, `To ${p[p.length - 1].name}`) : null,
@@ -389,7 +416,7 @@ function trainCard(d, now) {
   const headline = cancelled ? 'Cancelled' : mins == null ? 'Delayed' : waitText(mins);
   const waitCls = cancelled ? 'wait bad' : isLate(d) ? 'wait late' : 'wait';
   const status = statusEl(d);
-  return h('div', { class: 'card', role: 'button', tabindex: 0, 'aria-expanded': String(s.openSid === d.serviceId),
+  return h('div', { class: 'card', role: 'button', tabindex: 0, 'data-key': `t:${trainKey(d)}`, 'aria-expanded': String(s.openSid === d.serviceId),
     onclick: () => toggleStops(d.serviceId), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStops(d.serviceId); } } },
   h('div', { class: 'head' },
     h('div', {}, h('div', { class: 'dest' }, d.destination),
@@ -402,7 +429,7 @@ function trainCard(d, now) {
 }
 
 function trainRow(d) {
-  return h('div', { class: isCancelled(d) ? 'row cancelled' : 'row', role: 'button', tabindex: 0,
+  return h('div', { class: isCancelled(d) ? 'row cancelled' : 'row', role: 'button', tabindex: 0, 'data-key': `t:${trainKey(d)}`,
     'aria-expanded': String(s.openSid === d.serviceId),
     onclick: () => toggleStops(d.serviceId), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStops(d.serviceId); } } },
   h('div', { class: 't' }, h('span', {}, d.std), h('small', {}, statusEl(d))),
@@ -414,13 +441,16 @@ function trainRow(d) {
 
 function banner(text, onRetry) {
   return h('div', { class: 'banner', role: 'status' }, h('span', {}, text),
-    onRetry ? h('button', { type: 'button', onclick: onRetry }, 'Retry') : null);
+    onRetry ? h('button', { type: 'button', 'data-key': 'retry', onclick: onRetry }, 'Retry') : null);
 }
 
 function moreEl(now, all) {
   if (s.loadingMore) return h('div', { class: 'spinner' });
   if (hasMore(now)) {
-    return h('div', { class: 'more' }, h('button', { type: 'button', disabled: rateLimited(), onclick: loadMore }, 'Show more'));
+    return h('div', { class: 'more' },
+      s.moreFailed ? h('p', { role: 'status' }, "Couldn't load more trains.") : null,
+      h('button', { type: 'button', 'data-key': 'more', disabled: rateLimited(), onclick: loadMore },
+        s.moreFailed ? 'Try again' : 'Show more'));
   }
   if (all.length === 0) return null;
   return h('div', { class: 'more' }, h('p', {},
@@ -429,6 +459,18 @@ function moreEl(now, all) {
 
 function renderStation() {
   if (!s) return;
+  try {
+    drawStation();
+  } catch (e) {
+    // Never a frozen page: an answer the page cannot draw shows as the API being unavailable.
+    console.error(e);
+    put(h('div', { class: 'top' }, link('/', '← What Platform', 'logo'), badge(true)),
+      banner("Couldn't show departures", () => { s.board = null; s.pages = []; s.loading = true; drawStation(); refresh(true); }),
+      footer());
+  }
+}
+
+function drawStation() {
   const now = Date.now();
   const b = s.board;
   const name = b?.name ?? nameOf(s.crs);
@@ -466,7 +508,7 @@ function renderStation() {
   if (msgs.length) {
     const open = s.alertsOpen || all.length === 0;
     body.push(h('div', { class: 'alerts' },
-      h('button', { type: 'button', 'aria-expanded': String(open), onclick: () => { s.alertsOpen = !open; renderStation(); } },
+      h('button', { type: 'button', 'data-key': 'alerts', 'aria-expanded': String(open), onclick: () => { s.alertsOpen = !open; renderStation(); } },
         `⚠ ${msgs.length === 1 ? '1 service alert' : `${msgs.length} service alerts`}`),
       open ? msgs.map((m) => h('p', {}, m)) : null));
   }
@@ -476,9 +518,9 @@ function renderStation() {
     for (const f of s.filters) if (!dests.includes(f)) dests.push(f);
     if (dests.length > 1 || s.filters.size) {
       body.push(h('div', { class: 'chips' },
-        h('button', { class: 'chip', type: 'button', 'aria-pressed': String(s.filters.size === 0),
+        h('button', { class: 'chip', type: 'button', 'data-key': 'all', 'aria-pressed': String(s.filters.size === 0),
           onclick: () => { s.filters.clear(); renderStation(); } }, 'All'),
-        dests.map((d) => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(s.filters.has(d)),
+        dests.map((d) => h('button', { class: 'chip', type: 'button', 'data-key': `c:${d}`, 'aria-pressed': String(s.filters.has(d)),
           onclick: () => { if (s.filters.has(d)) s.filters.delete(d); else s.filters.add(d); renderStation(); } }, d))));
     }
     const visible = s.filters.size ? all.filter((d) => s.filters.has(d.destination)) : all;
@@ -498,17 +540,7 @@ function renderStation() {
     }
     body.push(moreEl(now, all));
   }
-  // Keep the search box's text and focus across re-renders (the clock re-renders every 15 s).
-  const active = document.activeElement;
-  const typing = active?.matches?.('.search input') ? { value: active.value, pos: active.selectionStart } : null;
   put(head, body, footer(b.attribution));
-  if (typing) {
-    const input = root.querySelector('.search input');
-    input.value = typing.value;
-    input.focus();
-    input.setSelectionRange(typing.pos, typing.pos);
-    input.dispatchEvent(new Event('input'));
-  }
 }
 
 window.addEventListener('popstate', route);

@@ -12,6 +12,18 @@ export class ApiError extends Error {
   }
 }
 
+const isStr = (v) => typeof v === 'string';
+
+/** A departures board the page can draw: anything else is treated as the API being unavailable. */
+export const validBoard = (j) => j != null && typeof j === 'object' && isStr(j.generatedAt)
+  && !Number.isNaN(Date.parse(j.generatedAt)) && Array.isArray(j.services)
+  && j.services.every((d) => d && isStr(d.std) && isStr(d.destination))
+  && (j.nrccMessages == null || (Array.isArray(j.nrccMessages) && j.nrccMessages.every(isStr)));
+
+/** The station list: {stations: [{crs, name, lat, lon}]}. */
+export const validStations = (j) => j != null && Array.isArray(j.stations)
+  && j.stations.every((x) => x && isStr(x.crs) && isStr(x.name) && Number.isFinite(x.lat) && Number.isFinite(x.lon));
+
 /** GET `url` as JSON, giving up after `timeoutMs` (then 'network'). Throws ApiError, or the
  * AbortError of a request the caller aborted through `signal`. */
 export async function fetchJson(url, fetchImpl = fetch, signal, timeoutMs = 15_000) {

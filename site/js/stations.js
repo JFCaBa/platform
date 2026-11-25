@@ -21,10 +21,13 @@ const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/['’.]/g, '').replace(/[-/(),&]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** Up to `limit` stations: exact CRS, then name prefix, then a word prefix, then substring. */
+const ALIASES = { x: 'cross', saint: 'st', intl: 'international' };
+
 export function searchStations(stations, query, limit = 8) {
-  const q = norm(query ?? '');
+  const raw = norm(query ?? '');
+  const q = raw.split(' ').map((w) => ALIASES[w] ?? w).join(' ');
   if (!q) return [];
-  const crsQ = q.toUpperCase();
+  const crsQ = raw.toUpperCase();
   const scored = [];
   for (const s of stations) {
     const name = norm(s.name);
