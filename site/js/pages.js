@@ -70,6 +70,10 @@ function chain(base, pages, nowMs) {
   return { pages: out, covered };
 }
 
+/** Pages made less than `maxAgeMs` ago. A page lists trains a few hours ahead: one left from
+ * hours ago (a tab open overnight) would bring back trains that have gone. */
+export const freshPages = (pages, nowMs, maxAgeMs) => pages.filter((p) => nowMs - generated(p) < maxAgeMs);
+
 /** The pages that still follow on from `base` without a gap, in order. */
 export const contiguousPages = (base, pages, nowMs) => chain(base, pages, nowMs).pages;
 

@@ -26,3 +26,19 @@ test('fetchJson: an aborted request rethrows the AbortError', async () => {
   const abort = async () => { throw new DOMException('aborted', 'AbortError'); };
   await assert.rejects(fetchJson('/x', abort), { name: 'AbortError' });
 });
+
+test('fetchJson: a request that never answers times out as network', async () => {
+  const hang = (url, { signal }) => new Promise((_, reject) =>
+    signal.addEventListener('abort', () => reject(signal.reason ?? new DOMException('aborted', 'AbortError'))));
+  const t0 = Date.now();
+  await assert.rejects(fetchJson('/x', hang, undefined, 50), (e) => e instanceof ApiError && e.kind === 'network');
+  assert.ok(Date.now() - t0 < 1000);
+});
+
+test('fetchJson: the caller aborting still rethrows AbortError, not a timeout', async () => {
+  const hang = (url, { signal }) => new Promise((_, reject) =>
+    signal.addEventListener('abort', () => reject(signal.reason ?? new DOMException('aborted', 'AbortError'))));
+  const c = new AbortController();
+  setTimeout(() => c.abort(), 10);
+  await assert.rejects(fetchJson('/x', hang, c.signal, 5000), { name: 'AbortError' });
+});

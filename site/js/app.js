@@ -2,9 +2,10 @@
 // Same behaviour as the app's home screen (app/lib/ui/home_screen.dart), minus following.
 import { apiBase, fetchJson, ApiError } from './api.js';
 import { parseRoute } from './route.js';
+import { stopsNeedFetch } from './stops.js';
 import { loadRecents, addRecent } from './recents.js';
 import { nearestStation, searchStations, formatDistance } from './stations.js';
-import { mergeServices, contiguousPages, startIn, endIn, nextOffset, coveredEnd, OFFSET_STEP } from './pages.js';
+import { mergeServices, contiguousPages, freshPages, startIn, endIn, nextOffset, coveredEnd, OFFSET_STEP } from './pages.js';
 import {
   isCancelled, statusText, isLate, nextTrainIndex, minutesUntilDeparture, waitText, londonMinutesUntil, londonHhmm,
 } from './text.js';
@@ -221,15 +222,24 @@ function openStation(crs) {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !s) return;
+  renderStation(); // at once: countdowns, «Live» and stale banners from the current clock
   const age = s.board ? Date.now() - Date.parse(s.board.generatedAt) : Infinity;
   if (age > REFRESH_MS) refresh();
-  else renderStation();
 });
 
 const rateLimited = () => s && Date.now() < s.rateLimitedUntil;
 
-async function refresh(manual = false) {
-  if (!s || (rateLimited() && !manual)) return;
+let inFlight = null; // {gen, promise}: one board request at a time per page
+
+function refresh(manual = false) {
+  if (!s || (rateLimited() && !manual)) return null;
+  if (inFlight?.gen === gen) return inFlight.promise;
+  const promise = doRefresh().finally(() => { if (inFlight?.promise === promise) inFlight = null; });
+  inFlight = { gen, promise };
+  return promise;
+}
+
+async function doRefresh() {
   const myGen = gen, crs = s.crs;
   try {
     const b = await fetchJson(`${API}/departures/${crs}`, fetch, abort.signal);
@@ -242,12 +252,15 @@ async function refresh(manual = false) {
     if (s.failed === 'ratelimited') s.rateLimitedUntil = Date.now() + RATE_LIMIT_MS;
   }
   s.loading = false;
+  s.pages = freshPages(s.pages, Date.now(), EXPIRE_MS);
+  if (s.openSid) loadStops(s.openSid);
   if (s.board?.name) addRecent(storage, { crs, name: s.board.name });
   renderStation();
 }
 
 function livePages(now) {
-  return s.board && s.pages.length ? contiguousPages(s.board, s.pages, now) : [];
+  const pages = freshPages(s.pages, now, EXPIRE_MS);
+  return s.board && pages.length ? contiguousPages(s.board, pages, now) : [];
 }
 
 function services(now) {
@@ -275,9 +288,10 @@ const reachedEnd = (now) => {
 };
 
 async function loadMore() {
+  if (!s) return;
   const now = Date.now();
   const off = nextPageOffset(now);
-  if (!s || off == null || s.loadingMore || rateLimited()) return;
+  if (off == null || s.loadingMore || rateLimited()) return;
   const myGen = gen, crs = s.crs;
   s.loadingMore = true;
   renderStation();
@@ -300,19 +314,26 @@ async function loadMore() {
   renderStation();
 }
 
-async function toggleStops(sid) {
+function toggleStops(sid) {
   s.openSid = s.openSid === sid ? null : sid;
   renderStation();
-  if (!s.openSid || s.stops.has(sid)) return;
+  if (s.openSid) loadStops(sid);
+}
+
+/** Fetches `sid`'s stops when missing, failed or older than the board refresh; the old ones
+ * stay on screen meanwhile. Also called on every board refresh for the open train. */
+async function loadStops(sid) {
+  if (!sid || !stopsNeedFetch(s.stops.get(sid), Date.now())) return;
   const myGen = gen;
-  s.stops.set(sid, 'loading');
+  const old = s.stops.get(sid);
+  s.stops.set(sid, old?.state === 'ok' ? { ...old, pending: true } : { state: 'loading', at: Date.now(), pending: true });
   try {
     const j = await fetchJson(`${API}/service/${encodeURIComponent(sid)}`, fetch, abort.signal);
     if (myGen !== gen) return;
-    s.stops.set(sid, j.portions ?? []);
+    s.stops.set(sid, { state: 'ok', portions: Array.isArray(j.portions) ? j.portions : [], at: Date.now() });
   } catch (e) {
     if (myGen !== gen || e?.name === 'AbortError') return;
-    s.stops.set(sid, 'error');
+    s.stops.set(sid, old?.state === 'ok' ? { ...old, at: 0 } : { state: 'error', at: Date.now() });
   }
   if (s.openSid === sid) renderStation();
 }
@@ -326,12 +347,12 @@ function stopStatus(st) {
 
 function stopsPanel(d) {
   const sid = d.serviceId;
-  const got = sid ? s.stops.get(sid) : 'error';
+  const got = sid ? s.stops.get(sid) : { state: 'error' };
   let body;
-  if (got === 'loading' || got === undefined) body = h('div', { class: 'sub' }, 'Loading stops…');
-  else if (got === 'error') body = h('div', { class: 'sub' }, 'Stops unavailable');
+  if (!got || got.state === 'loading') body = h('div', { class: 'sub' }, 'Loading stops…');
+  else if (got.state === 'error') body = h('div', { class: 'sub' }, 'Stops unavailable');
   else {
-    const portions = got.filter((p) => p.length);
+    const portions = got.portions.filter((p) => Array.isArray(p) && p.length);
     body = portions.length === 0 ? h('div', { class: 'sub' }, 'No more stops')
       : portions.map((p) => [
         portions.length > 1 ? h('div', { class: 'to' }, `To ${p[p.length - 1].name}`) : null,

@@ -102,3 +102,12 @@ test('the API window wins over darwinWindow', () => {
   const page = { ...board([], { offset: 30, complete: true }), window: 60 };
   assert.equal(endIn(page, now), 90);
 });
+
+import { freshPages } from '../js/pages.js';
+test('freshPages drops pages older than the limit (a tab left open overnight)', () => {
+  const yesterday = board([dep('18:00', { id: 'y' })], { offset: 90, at: now - 15.5 * 60 * min });
+  const recent = board([dep('11:10', { id: 'r' })], { offset: 60, at: now - 2 * min });
+  assert.deepEqual(freshPages([yesterday, recent], now, 10 * min), [recent]);
+  const base = board([dep('10:10', { id: 'a' })]);
+  assert.deepEqual(mergeServices(base, freshPages([yesterday], now, 10 * min), now).map((d) => d.serviceId), ['a']);
+});

@@ -12,14 +12,17 @@ export class ApiError extends Error {
   }
 }
 
-/** GET `url` as JSON. Throws ApiError, or the AbortError of an aborted request. */
-export async function fetchJson(url, fetchImpl = fetch, signal) {
+/** GET `url` as JSON, giving up after `timeoutMs` (then 'network'). Throws ApiError, or the
+ * AbortError of a request the caller aborted through `signal`. */
+export async function fetchJson(url, fetchImpl = fetch, signal, timeoutMs = 15_000) {
+  const timeout = AbortSignal.timeout(timeoutMs);
   let r;
   try {
-    r = await fetchImpl(url, { signal });
+    r = await fetchImpl(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   } catch (e) {
-    if (e?.name === 'AbortError') throw e;
-    throw new ApiError('network');
+    if (signal?.aborted) throw new DOMException('aborted', 'AbortError'); // the caller moved on
+    if (e?.name === 'AbortError' && !timeout.aborted) throw e;
+    throw new ApiError('network'); // offline, refused, or timed out
   }
   if (r.status === 404) throw new ApiError('notfound', 404);
   if (r.status === 429) throw new ApiError('ratelimited', 429);
