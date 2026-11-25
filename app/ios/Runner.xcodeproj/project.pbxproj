@@ -18,9 +18,11 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
+		79B2D02411734BAD6ACB9980 /* NextTrainsData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CCA49C1EDA09D1309D9C39 /* NextTrainsData.swift */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		B0982AF6147B9B408BF664EA /* NextTrainsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60228571DEF4F2F166591CA8 /* NextTrainsWidget.swift */; };
 		B9F48BC5044AF2FDB0A92684 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6A1AE22A2DD4C6CD0785AECB /* WidgetKit.framework */; };
 		CB9BE78E36E16EAD42B650BC /* FollowActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BFD4DC20D63FC63CC363523 /* FollowActivityBundle.swift */; };
 /* End PBXBuildFile section */
@@ -76,9 +78,11 @@
 		4700A4D578500362B166B22B /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		4BFD4DC20D63FC63CC363523 /* FollowActivityBundle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FollowActivityBundle.swift; sourceTree = "<group>"; };
 		59C79E98AB62DCBC16346BF9 /* TrainActivityAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrainActivityAttributes.swift; sourceTree = "<group>"; };
+		60228571DEF4F2F166591CA8 /* NextTrainsWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NextTrainsWidget.swift; sourceTree = "<group>"; };
 		6A1AE22A2DD4C6CD0785AECB /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		75CCA49C1EDA09D1309D9C39 /* NextTrainsData.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NextTrainsData.swift; sourceTree = "<group>"; };
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
 		7A1F0E5C2F1B4D0000A1B2C3 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
@@ -92,6 +96,7 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		CA932FF9E3201EA284CDCF4B /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		F829921B382F5A95080330E1 /* FollowActivity.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = FollowActivity.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -198,6 +203,9 @@
 				4BFD4DC20D63FC63CC363523 /* FollowActivityBundle.swift */,
 				7DB3E705FBEC7F682B7A9F66 /* FollowActivityLiveActivity.swift */,
 				4700A4D578500362B166B22B /* Info.plist */,
+				60228571DEF4F2F166591CA8 /* NextTrainsWidget.swift */,
+				75CCA49C1EDA09D1309D9C39 /* NextTrainsData.swift */,
+				F829921B382F5A95080330E1 /* FollowActivity.entitlements */,
 			);
 			name = FollowActivity;
 			path = FollowActivity;
@@ -386,6 +394,8 @@
 				CB9BE78E36E16EAD42B650BC /* FollowActivityBundle.swift in Sources */,
 				2FC031A85F719E96AC8121F5 /* FollowActivityLiveActivity.swift in Sources */,
 				25C17413A00EE5224F7472F6 /* TrainActivityAttributes.swift in Sources */,
+				B0982AF6147B9B408BF664EA /* NextTrainsWidget.swift in Sources */,
+				79B2D02411734BAD6ACB9980 /* NextTrainsData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -728,6 +738,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = FollowActivity/FollowActivity.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = JH8NFJ6XW7;
@@ -756,6 +767,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = FollowActivity/FollowActivity.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = JH8NFJ6XW7;
@@ -783,6 +795,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = FollowActivity/FollowActivity.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = JH8NFJ6XW7;

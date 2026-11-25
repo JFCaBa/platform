@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_text">#FF1B1B1F</color>
+    <color name="widget_muted">#FF6B6B70</color>
+    <color name="widget_brand">#FF1E3A8A</color>
+    <color name="widget_amber">#FFB45309</color>
+    <string name="widget_description">Next trains and platforms at the last station you opened.</string>
+    <string name="widget_empty">Open What Platform to see the next trains</string>
+    <string name="widget_no_trains">No trains in the next hours</string>
+    <string name="widget_cancelled">Cancelled</string>
+    <string name="widget_delayed">Delayed</string>
+    <string name="widget_late">Late</string>
+    <string name="widget_on_time">On time</string>
+</resources>

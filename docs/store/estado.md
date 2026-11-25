@@ -126,6 +126,30 @@ Además: Android 1.1.0 (7) sigue esperando a que Google apruebe la versión 4 de
 - Android: AAB 12 en app/build/app/outputs/bundle/release/app-release.aab (52,4 MB). Lo sube el usuario.
 - Política de privacidad actualizada (token de la Live Activity, solo en memoria).
 
+## 1.5.0 (13) — home screen widget (22-11-2026; branch merged to main 25-11-2026)
+
+- iOS (small: time + platform; medium: time, destination, platform, countdown) and Android (4x2,
+  resizable) widget with the next 4 trains of the last station opened, with its destination filters.
+- Refreshes by itself: fetches `/departures/{CRS}` (iOS timeline every ~15 min; Android WorkManager
+  every 15 min with network). Gallery preview with a London Euston sample.
+- App Group `group.com.jfcaba.platform` added to Runner and FollowActivity (Xcode registers it on the
+  first archive with -allowProvisioningUpdates).
+- No new data collected: App Privacy unchanged.
+- Verified: Android emulator (gallery preview, real Euston board, worker fetch); iOS simulator build
+  and renders. Real iPhone pending.
+- 22-11-2026 17:27: iOS build 1.5.0 (13) uploaded to App Store Connect for TestFlight (from the
+  branch; App Group entitlement on app and extension checked). Not assigned to any version.
+- 22-11-2026: Play internal testing (first use of the track) draft release 13 (1.5.0) saved, AAB
+  uploaded by the user, notes en-GB. Pending (user): testers list, Next → roll out. Alpha keeps 12
+  (1.4.0) Ready to publish. What Platform is under the jfcaba68 Google account (Play Console u/1).
+- Merged to main 25-11-2026; next: archive and AAB of the 1.5.0 for the stores.
+- Notes for the stores (draft): "New home screen widget: your next trains and platforms at a glance."
+
+## 1.5.0 (14) — About button (22-11-2026)
+
+- iOS build 14 uploaded to App Store Connect. AAB 1.5.0 (14) uploaded by the user to a new internal testing release
+  ("14 (1.5.0)", en-GB notes: widget + About button), rolled out by the user on 22-11-2026.
+
 ## Estadísticas de uso en el servidor (23-11-2026)
 
 Página `/admin` (spec `docs/superpowers/specs/2026-11-23-admin-stats-design.md`). Política
@@ -146,4 +170,4 @@ privacidad de las tiendas, conclusión de Claude: **sin cambios**.
 - https://whatplatform.uk es ahora la web (panel como la app, botón de App Store); la política de privacidad pasa a https://whatplatform.uk/privacy.
 - Play: URL de privacidad cambiada a `/privacy` en App content (el usuario guarda y envía desde Publishing overview).
 - App Store: la URL de privacidad solo se puede cambiar con una versión nueva → cambiarla al preparar la 1.5.0, junto con `privacyUrl` en `app/lib/config.dart` (`https://whatplatform.uk/privacy`). Mientras tanto el enlace de las apps instaladas abre la portada, que enlaza a Privacy.
-- Arreglado en `feat/home-widget` (sale con la 1.5.0): las páginas de «Show more» caducan a los 10 min (no vuelven trenes de ayer tras una noche en segundo plano), la hora repetida de octubre y `privacyUrl` = `/privacy`. Al preparar la 1.5.0 hay que recompilar (el build 14 no lo lleva) y cambiar la URL de privacidad en App Store Connect.
+- Arreglado en main (sale con la 1.5.0): las páginas de «Show more» caducan a los 10 min (no vuelven trenes de ayer tras una noche en segundo plano), la hora repetida de octubre y `privacyUrl` = `/privacy`. Al preparar la 1.5.0 hay que recompilar (el build 14 no lo lleva) y cambiar la URL de privacidad en App Store Connect.

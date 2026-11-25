@@ -9,6 +9,7 @@ import '../domain/position.dart';
 import '../follow/follow_logic.dart';
 import '../follow/follow_tracker.dart';
 import '../follow/follower.dart';
+import 'about_sheet.dart';
 import 'departure_row.dart';
 import 'format.dart';
 import 'station_picker.dart';
@@ -166,34 +167,49 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          onTap: () => _pick(context),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Icon(c.manualStation ? Icons.place_outlined : Icons.my_location, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: () => _pick(context),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
                     children: [
-                      Text(
-                        name,
-                        style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-                        overflow: TextOverflow.ellipsis,
+                      Icon(c.manualStation ? Icons.place_outlined : Icons.my_location, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            ?_liveStatus(context),
+                          ],
+                        ),
                       ),
-                      ?_liveStatus(context),
+                      if (c.distanceMeters != null)
+                        Text(formatDistance(c.distanceMeters!), style: theme.textTheme.bodyMedium),
+                      const Icon(Icons.expand_more),
                     ],
                   ),
                 ),
-                if (c.distanceMeters != null)
-                  Text(formatDistance(c.distanceMeters!), style: theme.textTheme.bodyMedium),
-                const Icon(Icons.expand_more),
-              ],
+              ),
             ),
-          ),
+            IconButton(
+              icon: const Icon(Icons.info_outline),
+              tooltip: 'About',
+              onPressed: () => showAboutSheet(
+                context,
+                attribution: c.board?.attribution ?? 'Data: National Rail',
+                onPrivacy: () => _openPrivacy(context),
+              ),
+            ),
+          ],
         ),
         if (recent.isNotEmpty)
           Padding(
