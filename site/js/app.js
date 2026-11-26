@@ -1,7 +1,7 @@
 // What Platform on the web: home (search, location, popular stations) and /station/{CRS} boards.
 // Same behaviour as the app's home screen (app/lib/ui/home_screen.dart), minus following.
 import { apiBase, fetchJson, ApiError, validBoard, validStations } from './api.js';
-import { parseRoute } from './route.js';
+import { parseRoute, extraBelongs } from './route.js';
 import { stopsNeedFetch } from './stops.js';
 import { loadRecents, addRecent } from './recents.js';
 import { nearestStation, searchStations, formatDistance } from './stations.js';
@@ -117,6 +117,11 @@ function route() {
   abort = new AbortController();
   stopTimers();
   window.scrollTo(0, 0);
+  const extra = document.getElementById('extra'); // server-built, for the page first loaded
+  if (extra && !extraBelongs(extra.dataset.path, location.pathname)) {
+    extra.remove();
+    document.querySelector('script[type="application/ld+json"]')?.remove(); // describes that page
+  }
   const r = parseRoute(location.pathname);
   if (r.page === 'station') {
     if (location.pathname !== r.canonical) return go(r.canonical, true);
@@ -167,12 +172,18 @@ function searchBox(placeholder) {
 // ---- home -------------------------------------------------------------------------------------
 function setMeta(title, description) {
   document.title = title;
-  document.querySelector('meta[name="description"]')?.setAttribute('content', description);
+  const set = (sel, v) => document.querySelector(sel)?.setAttribute(sel.startsWith('link') ? 'href' : 'content', v);
+  set('meta[name="description"]', description);
+  set('meta[property="og:title"]', title);
+  set('meta[property="og:description"]', description);
+  const url = `https://whatplatform.uk${location.pathname}`;
+  set('link[rel="canonical"]', url);
+  set('meta[property="og:url"]', url);
 }
 
 function renderHome() {
   setMeta('What Platform — which platform is my train?',
-    'Live departures, platforms and delays for every station in Great Britain.');
+    'Live departures, platforms and delays for every station in Great Britain, updated every 30 seconds. Free, no sign-up.');
   const note = h('p', { class: 'note', hidden: true, role: 'status' });
   const locate = h('button', { class: 'btn', type: 'button' }, 'Use my location');
   locate.addEventListener('click', () => useLocation(locate, note));

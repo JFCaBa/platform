@@ -104,3 +104,15 @@ footer a { color: var(--muted); }
 .privacy h2 { font-size: 18px; margin: 26px 0 8px; }
 .privacy p, .privacy li { color: var(--ink); }
 .privacy .updated { color: var(--muted); font-size: 14px; }
+
+/* Server-built extras (deploy/web/build_pages.py): nearby stations, How it works, A–Z */
+.extra { max-width: 560px; margin: 0 auto; padding: 0 16px 32px; color: var(--muted); font-size: 15px; }
+.extra h2 { font-size: 15px; color: var(--ink); margin: 8px 0 8px; }
+.extra p { margin: 8px 0; }
+.nearby, .az { list-style: none; margin: 0; padding: 0; }
+.nearby li, .az li { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.nearby a, .az a { color: var(--ink); text-decoration: none; }
+.nearby .crs, .az .crs { color: var(--muted); font-size: 13px; flex: none; }
+.letters { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 12px 0; font-weight: 600; }
+.letters a { text-decoration: none; }
+main h2[id] { font-size: 18px; margin: 22px 0 4px; scroll-margin-top: 12px; }

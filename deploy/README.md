@@ -73,7 +73,18 @@ Static files in `site/`, served by nginx from the repo checkout (`/opt/platform/
 (`test/`, `package.json`) answers 404. The browser calls `https://api.whatplatform.uk` directly;
 the API locations it uses send `Access-Control-Allow-Origin: https://whatplatform.uk`.
 
-- Tests: `node --test site/test/*.test.js` (Node's own runner, no dependencies).
+Search engines get one crawlable page per station: `deploy/web/build_pages.py` builds
+`station/{CRS}.html` (title, canonical, JSON-LD, nearby stations; the board still comes from the JS),
+`stations.html` (A–Z, served at `/stations`) and `sitemap.xml` from `stations.json` into
+`/opt/platform/pages/current` (a symlink swapped atomically; the previous build is kept).
+`refresh.sh` rebuilds them monthly; rebuild by hand after a deploy that changes `site/index.html`.
+Any 404 answers with the page shell and status 404. `robots.txt` points to the sitemap. Registered
+in Google Search Console (Domain property) and Bing Webmaster Tools.
+
+- Tests: `node --test site/test/*.test.js` (Node's own runner, no dependencies) and
+  `python3 -m unittest discover -s deploy/web -p 'test_*.py'`.
+- First time on the server: `sudo install -d -o ubuntu -g ubuntu /opt/platform/pages`, then the
+  build below.
 - Local: `python3 deploy/web/dev.py` → http://localhost:8000/ (serves `site/` like nginx and
   proxies the API with a User-Agent the stats do not count as a person).
 - Deploy: `git pull` (files) and, when the nginx conf changed, copy it and reload (Update below).
@@ -82,6 +93,9 @@ the API locations it uses send `Access-Control-Allow-Origin: https://whatplatfor
   ```bash
   curl -sI -A Mozilla/5.0 https://whatplatform.uk/ | grep -i -E '^HTTP|content-security'   # 200 + CSP
   curl -sI -A Mozilla/5.0 https://whatplatform.uk/station/KGX | head -1                      # 200
+  curl -s -A Mozilla/5.0 https://whatplatform.uk/station/KGX | grep -o '<title>[^<]*'         # Kings Cross
+  curl -sI -A Mozilla/5.0 https://whatplatform.uk/station/ZZZ | head -1                      # 404
+  curl -s -A Mozilla/5.0 https://whatplatform.uk/sitemap.xml | grep -c '<url>'               # stations + 3
   curl -sI -A Mozilla/5.0 https://whatplatform.uk/privacy | head -1                          # 200
   curl -sI -A Mozilla/5.0 https://whatplatform.uk/test/api.test.js | head -1                 # 404
   curl -sI -A Mozilla/5.0 https://api.whatplatform.uk/departures/KGX | grep -i access-control  # whatplatform.uk
@@ -91,6 +105,7 @@ the API locations it uses send `Access-Control-Allow-Origin: https://whatplatfor
 
 ```sh
 cd /opt/platform/repo && sudo git pull --ff-only
+python3 deploy/web/build_pages.py                                # website pages (as ubuntu)
 cd api && sudo docker compose up -d --build                     # API changes
 # API logs: Darwin failures (station code + reason), `apns <status> <reason>` / `apns network <Class>`,
 # `follow poller: <Class>`, `unhandled <Class>` and a startup line `follow: on|off`.

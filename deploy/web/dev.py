@@ -6,6 +6,10 @@
 The browser's API base is '' on localhost (site/js/api.js), so /departures/..., /service/... and
 /stations.json come here and are fetched from https://api.whatplatform.uk. The User-Agent has
 "preview", so the stats do not count it as a person.
+
+Station pages, /stations and /sitemap.xml come from _site/web when it has been built:
+    python3 deploy/web/build_pages.py --stations FILE --out _site/web
+otherwise station URLs get the plain shell (as on a server before its first build).
 """
 from __future__ import annotations
 
@@ -17,11 +21,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 SITE = Path(__file__).resolve().parents[2] / "site"
+WEB = SITE.parent / "_site" / "web"
 API = "https://api.whatplatform.uk"
 UA = "Mozilla/5.0 (WhatPlatform dev; preview)"
 PROXY = re.compile(r"^/(departures/[A-Z]{3}(/[0-9]{1,3})?|service/[A-Za-z0-9_-]{6,40}|stations\.json)$")
 SHELL = re.compile(r"^/(station/[A-Za-z]{3}/?)?$")
-PUBLIC = re.compile(r"^/(style\.css|js/[a-z]+\.js|app-store-badge\.svg|favicon\.png|apple-touch-icon\.png)$")
+PUBLIC = re.compile(r"^/(robots\.txt|style\.css|js/[a-z]+\.js|app-store-badge\.svg|favicon\.png|apple-touch-icon\.png)$")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -32,6 +37,12 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if PROXY.match(path):
             return self.proxy(path)
+        m = re.match(r"^/station/([A-Z]{3})/?$", path)
+        built = {"/stations": "stations.html", "/sitemap.xml": "sitemap.xml"}.get(path)
+        if m and (WEB / "station" / f"{m.group(1)}.html").exists():
+            return self.send_built(WEB / "station" / f"{m.group(1)}.html")
+        if built and (WEB / built).exists():
+            return self.send_built(WEB / built)
         if SHELL.match(path):
             self.path = "/index.html"
         elif re.match(r"^/privacy/?$", path):
@@ -39,6 +50,14 @@ class Handler(SimpleHTTPRequestHandler):
         elif not PUBLIC.match(path):
             return self.send_error(404)
         return super().do_GET()
+
+    def send_built(self, file: Path):
+        body = file.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/xml" if file.suffix == ".xml" else "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def proxy(self, path: str):
         req = urllib.request.Request(API + path, headers={"User-Agent": UA})

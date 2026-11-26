@@ -4,6 +4,8 @@
 #   17 4 3 * * /usr/bin/bash /opt/platform/repo/deploy/stations/refresh.sh >> /opt/platform/stations/refresh.log 2>&1
 # build_stations.py validates the list and replaces the file atomically: on any failure the
 # previous file stays. A lock keeps a manual run and cron from overlapping.
+# Then the website's station pages and sitemap are rebuilt from it (deploy/web/build_pages.py,
+# into /opt/platform/pages/current; on failure the published pages stay).
 set -euo pipefail
 REPO=${REPO:-/opt/platform/repo}
 OUT_DIR=${OUT_DIR:-/opt/platform/stations}
@@ -19,4 +21,5 @@ if ! flock -n 9; then
 fi
 log "start"
 python3 "$REPO/pipeline/build_stations.py" --out "$OUT_DIR/stations.json"
+python3 "$REPO/deploy/web/build_pages.py" --stations "$OUT_DIR/stations.json" --site "$REPO/site"
 log "done"
