@@ -153,7 +153,9 @@ def a_to_z_page(all_st: list[dict]) -> str:
 <meta name="description" content="{e(desc)}">
 <link rel="canonical" href="{ORIGIN}/stations">
 <meta name="color-scheme" content="light dark">
-<link rel="icon" href="/favicon.png" type="image/png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="96x96">
+<link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/style.css">
 </head>

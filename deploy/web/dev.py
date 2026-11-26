@@ -26,7 +26,7 @@ API = "https://api.whatplatform.uk"
 UA = "Mozilla/5.0 (WhatPlatform dev; preview)"
 PROXY = re.compile(r"^/(departures/[A-Z]{3}(/[0-9]{1,3})?|service/[A-Za-z0-9_-]{6,40}|stations\.json)$")
 SHELL = re.compile(r"^/(station/[A-Za-z]{3}/?)?$")
-PUBLIC = re.compile(r"^/(robots\.txt|style\.css|js/[a-z]+\.js|app-store-badge\.svg|favicon\.png|apple-touch-icon\.png)$")
+PUBLIC = re.compile(r"^/(robots\.txt|style\.css|js/[a-z]+\.js|app-store-badge\.svg|favicon\.ico|favicon\.png|icon-192\.png|apple-touch-icon\.png)$")
 
 
 class Handler(SimpleHTTPRequestHandler):
